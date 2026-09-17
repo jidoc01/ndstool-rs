@@ -12,7 +12,7 @@ mod rom;
 fn main() -> io::Result<()> {
     let a: Vec<String> = env::args().skip(1).collect();
     if a.is_empty() {
-        eprintln!("usage: ndstool-rs -i ROM.nds | -l ROM.nds | -x ROM.nds [-d DIR] [-9 FILE] [-7 FILE] [-b FILE] [-o FILE]");
+        eprintln!("usage: ndstool-rs -i ROM.nds | -l ROM.nds | -x ROM.nds [-d DIR] [-9 FILE] [-7 FILE] [-b FILE] [-o FILE] [-y9 FILE] [-y7 FILE]");
         return Ok(());
     };
     let mode = a[0].as_str();
@@ -169,6 +169,8 @@ fn main() -> io::Result<()> {
     let mut arm7 = None;
     let mut banner = None;
     let mut logo = None;
+    let mut arm9_overlay_table = None;
+    let mut arm7_overlay_table = None;
     let mut overlays = None;
     let mut jobs = 1usize;
     let mut i = 2;
@@ -185,6 +187,8 @@ fn main() -> io::Result<()> {
             "-7" => arm7 = Some(PathBuf::from(value(i + 1)?)),
             "-b" | "-t" => banner = Some(PathBuf::from(value(i + 1)?)),
             "-o" => logo = Some(PathBuf::from(value(i + 1)?)),
+            "-y9" => arm9_overlay_table = Some(PathBuf::from(value(i + 1)?)),
+            "-y7" => arm7_overlay_table = Some(PathBuf::from(value(i + 1)?)),
             "-y" => overlays = Some(PathBuf::from(value(i + 1)?)),
             "--parallel" => {
                 jobs = std::thread::available_parallelism()
@@ -226,6 +230,12 @@ fn main() -> io::Result<()> {
     }
     if let Some(path) = logo {
         rom::extract_range(&rom, &path, 0xC0, 156)?;
+    }
+    if let Some(path) = arm9_overlay_table {
+        rom::extract_range(&rom, &path, h.arm9_overlay_offset, h.arm9_overlay_size)?;
+    }
+    if let Some(path) = arm7_overlay_table {
+        rom::extract_range(&rom, &path, h.arm7_overlay_offset, h.arm7_overlay_size)?;
     }
     if let Some(path) = overlays {
         rom::extract_overlays(

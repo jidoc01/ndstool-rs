@@ -146,11 +146,9 @@ pub(crate) fn build_image(
         let start = names.len() as u32;
         let first = *file_id;
         let mut files: Vec<_> = node.files.iter().collect();
-        files.sort_by(|(a, _), (b, _)| {
-            a.to_ascii_lowercase()
-                .cmp(&b.to_ascii_lowercase())
-                .then_with(|| a.cmp(b))
-        });
+        // ndstool assigns IDs using byte-wise name ordering. Do not fold case
+        // here: changing this order changes every subsequent file ID.
+        files.sort_by(|(a, _), (b, _)| a.cmp(b));
         for (name, path) in files {
             names.push(name.len() as u8);
             names.extend_from_slice(name.as_bytes());
@@ -161,11 +159,9 @@ pub(crate) fn build_image(
         }
         let mut child_ids = Vec::new();
         let mut dirs: Vec<_> = node.dirs.iter().collect();
-        dirs.sort_by(|(a, _), (b, _)| {
-            a.to_ascii_lowercase()
-                .cmp(&b.to_ascii_lowercase())
-                .then_with(|| a.cmp(b))
-        });
+        // Directory IDs affect the FNT tree, so use the same case-sensitive
+        // ordering for directories as for files.
+        dirs.sort_by(|(a, _), (b, _)| a.cmp(b));
         for (name, _) in &dirs {
             let child = 0xf000 | *next_dir;
             *next_dir += 1;
