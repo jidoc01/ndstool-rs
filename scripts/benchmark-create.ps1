@@ -17,6 +17,15 @@ function Invoke-Creation([string]$Name, [string]$Exe, [bool]$Parallel) {
         '-t', (Join-Path $InputRoot 'banner.bin'),
         '-o', (Join-Path $InputRoot 'logo.bin')
     )
+    foreach ($table in @('arm9ovr.bin', 'arm7ovr.bin')) {
+        $tablePath = Join-Path $InputRoot $table
+        if (Test-Path -LiteralPath $tablePath) {
+            $option = if ($table.StartsWith('arm9')) { '-y9' } else { '-y7' }
+            $arguments += @($option, $tablePath)
+        }
+    }
+    $overlayPath = Join-Path $InputRoot 'overlays'
+    if (Test-Path -LiteralPath $overlayPath) { $arguments += @('-y', $overlayPath) }
     if ($Parallel) { $arguments += '--parallel' }
     $times = @()
     1..3 | ForEach-Object {
