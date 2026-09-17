@@ -227,22 +227,77 @@ pub(crate) fn build_image(
             placement.swap(i, (random as usize) % (i + 1));
         }
     }
-    let mut data = Vec::new();
+    let mut placements = Vec::with_capacity(ordered.len());
     let mut fat = vec![0u8; ordered.len() * 8];
     let mut cursor = base_offset;
     for index in placement {
         let (file_id, bytes) = &ordered[index];
         let aligned = (cursor + 0x1ff) & !0x1ff;
-        data.resize(data.len() + (aligned - cursor) as usize, 0xff);
         cursor = aligned;
         let start = cursor;
-        data.extend_from_slice(&bytes);
         cursor += bytes.len() as u32;
         let local_id = usize::from(*file_id - first_file_id);
         fat[local_id * 8..local_id * 8 + 4].copy_from_slice(&start.to_le_bytes());
         fat[local_id * 8 + 4..local_id * 8 + 8].copy_from_slice(&cursor.to_le_bytes());
+        placements.push(((start - base_offset) as usize, bytes.clone()));
     }
+    let mut data = vec![0xffu8; (cursor - base_offset) as usize];
+    copy_payloads(&mut data, placements, jobs)?;
     Ok(FsImage { data, fnt, fat })
+}
+
+fn copy_payloads(
+    data: &mut [u8],
+    placements: Vec<(usize, Vec<u8>)>,
+    jobs: usize,
+) -> io::Result<()> {
+    if jobs <= 1 || placements.len() <= 1 {
+        for (offset, bytes) in placements {
+            data[offset..offset + bytes.len()].copy_from_slice(&bytes);
+        }
+        return Ok(());
+    }
+
+    let worker_count = jobs.min(placements.len());
+    let chunk_size = placements.len().div_ceil(worker_count);
+    // Raw pointers are deliberately represented as an address while moving
+    // the worker closure between threads; the address remains valid because
+    // `data` is borrowed for the entire scoped-thread lifetime.
+    let data_start = data.as_mut_ptr() as usize;
+    let data_len = data.len();
+    thread::scope(|scope| {
+        let mut handles = Vec::new();
+        for chunk in placements.chunks(chunk_size) {
+            handles.push(scope.spawn(move || -> io::Result<()> {
+                for (offset, bytes) in chunk {
+                    if offset.saturating_add(bytes.len()) > data_len {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "payload placement exceeds filesystem image",
+                        ));
+                    }
+                    // Every range was assigned by the sequential layout pass;
+                    // alignment makes the ranges disjoint. Each worker writes
+                    // only its own range, so the raw pointer does not alias
+                    // another worker's mutable slice.
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            bytes.as_ptr(),
+                            (data_start as *mut u8).add(*offset),
+                            bytes.len(),
+                        );
+                    }
+                }
+                Ok(())
+            }));
+        }
+        for handle in handles {
+            handle
+                .join()
+                .map_err(|_| io::Error::other("parallel payload worker panicked"))??;
+        }
+        Ok(())
+    })
 }
 
 fn read_inputs(
