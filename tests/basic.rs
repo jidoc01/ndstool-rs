@@ -418,3 +418,32 @@ fn extract_overlay_from_table() {
     );
     let _ = fs::remove_dir_all(dir);
 }
+
+#[test]
+fn secure_area_encrypt_decrypt_round_trip() {
+    let dir = temp_dir();
+    let rom = dir.join("secure.nds");
+    let mut bytes = vec![0xffu8; 0x8000];
+    bytes[12..16].copy_from_slice(b"TEST");
+    bytes[0x4000..0x4008].fill(0xff);
+    bytes[0x4000..0x4004].copy_from_slice(&0xe7ffdeffu32.to_le_bytes());
+    bytes[0x4004..0x4008].copy_from_slice(&0xe7ffdeffu32.to_le_bytes());
+    let original = bytes[0x4000..0x4800].to_vec();
+    fs::write(&rom, bytes).unwrap();
+
+    let bin = env!("CARGO_BIN_EXE_ndstool-rs");
+    assert!(Command::new(bin)
+        .args(["-se", rom.to_str().unwrap()])
+        .status()
+        .unwrap()
+        .success());
+    assert!(Command::new(bin)
+        .args(["-sd", rom.to_str().unwrap()])
+        .status()
+        .unwrap()
+        .success());
+
+    let result = fs::read(&rom).unwrap();
+    assert_eq!(&result[0x4000..0x4800], original.as_slice());
+    let _ = fs::remove_dir_all(dir);
+}
