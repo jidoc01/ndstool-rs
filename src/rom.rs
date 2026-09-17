@@ -141,10 +141,20 @@ fn write_external_overlays(
     let mut cursor = table_offset + table.len();
     for p in (0..table.len()).step_by(32) {
         let id = u32::from_le_bytes(table[p..p + 4].try_into().unwrap());
-        let file_id = *next_file_id as u32;
-        *next_file_id = next_file_id
-            .checked_add(1)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "too many overlay files"))?;
+        // ndstool's extracted overlay filenames use the overlay ID as the
+        // FAT slot. Preserve the table's file-id field verbatim, but rebuild
+        // the payload layout from those filenames so an extract/recreate
+        // round trip reproduces the original ROM bytes.
+        let file_index = usize::try_from(id).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidInput, "overlay file ID is invalid")
+        })?;
+        if file_index >= 0x10000 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "overlay file ID is too large",
+            ));
+        }
+        *next_file_id = (*next_file_id).max((file_index + 1) as u16);
         let input = root.join(format!("overlay_{id:04}.bin"));
         let payload = fs::read(&input).map_err(|error| {
             io::Error::new(
@@ -156,8 +166,10 @@ fn write_external_overlays(
         rom.resize(start, 0xff);
         rom.extend_from_slice(&payload);
         cursor = start + payload.len();
-        fat.push((start as u32, cursor as u32));
-        put32(rom, table_offset + p + 24, file_id);
+        if fat.len() <= file_index {
+            fat.resize(file_index + 1, (0, 0));
+        }
+        fat[file_index] = (start as u32, cursor as u32);
     }
     *table_offset_field = table_offset as u32;
     *table_size_field = table.len() as u32;
@@ -183,7 +195,7 @@ pub(crate) fn create_with_tree(
     let secure_boot = arm9.entry == arm9.ram.saturating_add(0x800);
     let arm9_offset = if secure_boot { 0x4000usize } else { 0x200usize };
     let mut rom = vec![0xffu8; arm9_offset + arm9.data.len()];
-    rom[..0x200].fill(0);
+    rom[..arm9_offset].fill(0);
     let title = title.unwrap_or("NDSTOOL");
     let game_code = game_code.unwrap_or("####");
     let maker_code = maker_code.unwrap_or("01");
