@@ -1,4 +1,4 @@
-use crate::{banner, elf, filesystem, header, logo};
+use crate::{banner, crypto, elf, filesystem, header, logo};
 use std::{
     fs,
     fs::File,
@@ -219,7 +219,22 @@ pub(crate) fn create_with_tree(
     put32(&mut rom, 0x64, 0x0018_08F8);
     rom[0x6e..0x70].copy_from_slice(&0x051Eu16.to_le_bytes());
     put32(&mut rom, 0x84, if secure_boot { 0x4000 } else { 0x200 });
+    if secure_boot {
+        put32(&mut rom, 0x70, arm9.ram.saturating_add(0xA58));
+        put32(&mut rom, 0x74, arm7.ram.saturating_add(0x158));
+    }
     rom[arm9_offset..arm9_offset + arm9.data.len()].copy_from_slice(&arm9.data);
+    if secure_boot && arm9.data.len() >= 0x4000 {
+        let gamecode = u32::from_le_bytes([
+            game_code.as_bytes()[0],
+            game_code.as_bytes()[1],
+            game_code.as_bytes()[2],
+            game_code.as_bytes()[3],
+        ]);
+        let secure_crc =
+            crypto::encrypted_secure_area_crc(gamecode, &rom[arm9_offset..arm9_offset + 0x4000])?;
+        rom[0x6c..0x6e].copy_from_slice(&secure_crc.to_le_bytes());
+    }
 
     let mut arm9_overlay_offset = 0;
     let mut arm9_overlay_size = 0;

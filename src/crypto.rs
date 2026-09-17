@@ -375,6 +375,41 @@ fn put_word(data: &mut [u8], p: usize, value: u32) {
     data[p..p + 4].copy_from_slice(&value.to_le_bytes());
 }
 
+pub(crate) fn encrypted_secure_area_crc(gamecode: u32, area: &[u8]) -> io::Result<u16> {
+    if area.len() != 0x4000 || word(area, 0) != 0xe7ffdeff || word(area, 4) != 0xe7ffdeff {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "ARM9 secure area must be a decrypted 0x4000-byte block",
+        ));
+    }
+    let mut encrypted = area.to_vec();
+    let (mut magic, mut args) = init1(gamecode);
+    args[1] <<= 1;
+    args[2] >>= 1;
+    init2(&mut magic, &mut args);
+    for p in (8..0x800).step_by(8) {
+        let mut left = word(&encrypted, p + 4);
+        let mut right = word(&encrypted, p);
+        encrypt(&magic, &mut left, &mut right);
+        put_word(&mut encrypted, p, right);
+        put_word(&mut encrypted, p + 4, left);
+    }
+    put_word(&mut encrypted, 0, 0x7263_6e65);
+    put_word(&mut encrypted, 4, 0x6a62_4f79);
+    let mut left = word(&encrypted, 4);
+    let mut right = word(&encrypted, 0);
+    encrypt(&magic, &mut left, &mut right);
+    put_word(&mut encrypted, 0, right);
+    put_word(&mut encrypted, 4, left);
+    let (magic, _) = init1(gamecode);
+    let mut left = word(&encrypted, 4);
+    let mut right = word(&encrypted, 0);
+    encrypt(&magic, &mut left, &mut right);
+    put_word(&mut encrypted, 0, right);
+    put_word(&mut encrypted, 4, left);
+    Ok(crate::header::crc16(&encrypted))
+}
+
 pub(crate) fn transform_secure_area(path: &std::path::Path, option: char) -> io::Result<()> {
     let mut rom = std::fs::read(path)?;
     if rom.len() < 0x8000 {
