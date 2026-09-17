@@ -35,6 +35,7 @@ fn main() -> io::Result<()> {
         let mut arm7 = None;
         let mut data = None;
         let mut banner = None;
+        let mut logo = None;
         let mut i = 2;
         while i < a.len() {
             match a[i].as_str() {
@@ -42,6 +43,7 @@ fn main() -> io::Result<()> {
                 "-7" => arm7 = a.get(i + 1).map(PathBuf::from),
                 "-d" => data = a.get(i + 1).map(PathBuf::from),
                 "-t" | "-b" => banner = a.get(i + 1).map(PathBuf::from),
+                "-o" => logo = a.get(i + 1).map(PathBuf::from),
                 other => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
@@ -58,9 +60,16 @@ fn main() -> io::Result<()> {
             io::Error::new(io::ErrorKind::InvalidInput, "-c requires -7 ARM7.bin")
         })?;
         if let Some(root) = data.as_deref() {
-            rom::create_with_tree(&rom, &arm9, &arm7, Some(root), banner.as_deref())?;
+            rom::create_with_tree(
+                &rom,
+                &arm9,
+                &arm7,
+                Some(root),
+                banner.as_deref(),
+                logo.as_deref(),
+            )?;
         } else {
-            rom::create_with_tree(&rom, &arm9, &arm7, None, banner.as_deref())?;
+            rom::create_with_tree(&rom, &arm9, &arm7, None, banner.as_deref(), logo.as_deref())?;
         }
         println!("Created {}", rom.display());
         return Ok(());

@@ -118,6 +118,7 @@ pub(crate) fn create_with_tree(
     arm7_path: &Path,
     data_root: Option<&Path>,
     banner_path: Option<&Path>,
+    logo_path: Option<&Path>,
 ) -> io::Result<()> {
     let arm9 = elf::load(arm9_path, 0x02000000, 0x02000000)?;
     let arm7 = elf::load(arm7_path, 0x037f8000, 0x037f8000)?;
@@ -128,6 +129,16 @@ pub(crate) fn create_with_tree(
     rom[0..8].copy_from_slice(b"NDSTOOL ");
     rom[12..16].copy_from_slice(b"####");
     rom[16..18].copy_from_slice(b"01");
+    if let Some(path) = logo_path {
+        let logo = fs::read(path)?;
+        if logo.len() != 156 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "raw logo must be exactly 156 bytes",
+            ));
+        }
+        rom[0xc0..0xc0 + 156].copy_from_slice(&logo);
+    }
     put32(&mut rom, 0x20, arm9_offset as u32);
     put32(&mut rom, 0x24, arm9.entry);
     put32(&mut rom, 0x28, arm9.ram);

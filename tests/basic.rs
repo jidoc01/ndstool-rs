@@ -359,11 +359,15 @@ fn create_and_extract_raw_banner() {
     let arm7 = dir.join("arm7.bin");
     let rom = dir.join("test.nds");
     let extracted = dir.join("banner-out.bin");
+    let logo = dir.join("logo.bin");
+    let logo_out = dir.join("logo-out.bin");
     let mut banner_bytes = vec![0u8; 0x840];
     banner_bytes[0] = 1;
     banner_bytes[2] = 0x34;
     banner_bytes[3] = 0x12;
     fs::write(&banner, &banner_bytes).unwrap();
+    let logo_bytes: Vec<u8> = (0..156).map(|i| i as u8).collect();
+    fs::write(&logo, &logo_bytes).unwrap();
     fs::write(&arm9, [1u8]).unwrap();
     fs::write(&arm7, [2u8]).unwrap();
     let bin = env!("CARGO_BIN_EXE_ndstool-rs");
@@ -376,7 +380,9 @@ fn create_and_extract_raw_banner() {
             "-7",
             arm7.to_str().unwrap(),
             "-t",
-            banner.to_str().unwrap()
+            banner.to_str().unwrap(),
+            "-o",
+            logo.to_str().unwrap()
         ])
         .status()
         .unwrap()
@@ -386,12 +392,15 @@ fn create_and_extract_raw_banner() {
             "-x",
             rom.to_str().unwrap(),
             "-b",
-            extracted.to_str().unwrap()
+            extracted.to_str().unwrap(),
+            "-o",
+            logo_out.to_str().unwrap()
         ])
         .status()
         .unwrap()
         .success());
     assert_eq!(fs::read(extracted).unwrap(), banner_bytes);
+    assert_eq!(fs::read(logo_out).unwrap(), logo_bytes);
     let _ = fs::remove_dir_all(dir);
 }
 
