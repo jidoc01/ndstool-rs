@@ -179,7 +179,7 @@ pub(crate) fn create_with_tree(
     title: Option<&str>,
 ) -> io::Result<()> {
     let arm9 = elf::load(arm9_path, 0x02000000, 0x02000000)?;
-    let arm7 = elf::load(arm7_path, 0x037f8000, 0x037f8000)?;
+    let arm7 = elf::load(arm7_path, 0x0238_0000, 0x0238_0000)?;
     let arm9_offset = 0x200usize;
     let mut rom = vec![0xffu8; arm9_offset + arm9.data.len()];
     rom[..0x200].fill(0);

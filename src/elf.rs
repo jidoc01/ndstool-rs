@@ -36,9 +36,22 @@ fn raw(bytes: Vec<u8>, default_entry: u32, default_ram: u32) -> LoadedImage {
     } else {
         bytes
     };
+    // Commercial ARM9 binaries extracted from a ROM include the 0x800-byte
+    // secure-area prefix before the actual entry point.  Starting execution
+    // at the first word (E7FFDEFF) produces an undefined instruction, so use
+    // the conventional post-prefix entry when that marker is present.
+    let has_secure_prefix = bytes.len() >= 0x800
+        && (0..3).all(|i| {
+            let p = i * 4;
+            u32::from_le_bytes(bytes[p..p + 4].try_into().unwrap()) == 0xE7FF_DEFF
+        });
     LoadedImage {
         data: bytes,
-        entry: default_entry,
+        entry: if has_secure_prefix {
+            default_entry.saturating_add(0x800)
+        } else {
+            default_entry
+        },
         ram: default_ram,
         overlays: Vec::new(),
     }
@@ -183,4 +196,25 @@ pub(crate) fn load(path: &Path, default_entry: u32, default_ram: u32) -> io::Res
         ram,
         overlays,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::raw;
+
+    #[test]
+    fn raw_secure_area_uses_post_prefix_entry() {
+        let mut bytes = vec![0u8; 0x800];
+        for i in 0..3 {
+            bytes[i * 4..i * 4 + 4].copy_from_slice(&0xE7FF_DEFFu32.to_le_bytes());
+        }
+        let image = raw(bytes, 0x0200_0000, 0x0200_0000);
+        assert_eq!(image.entry, 0x0200_0800);
+    }
+
+    #[test]
+    fn raw_homebrew_keeps_default_entry() {
+        let image = raw(vec![1, 2, 3, 4], 0x0200_0000, 0x0200_0000);
+        assert_eq!(image.entry, 0x0200_0000);
+    }
 }
