@@ -185,6 +185,7 @@ fn write_external_overlays(
     table_size_field: &mut u32,
     next_file_id: &mut u16,
     fat: &mut Vec<(u32, u32)>,
+    ignore_missing: bool,
 ) -> io::Result<()> {
     let table = fs::read(table_path)?;
     if table.is_empty() || table.len() % 32 != 0 {
@@ -220,12 +221,21 @@ fn write_external_overlays(
         }
         *next_file_id = (*next_file_id).max((file_index + 1) as u16);
         let input = root.join(format!("overlay_{id:04}.bin"));
-        let payload = fs::read(&input).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!("failed to read overlay {}: {error}", input.display()),
-            )
-        })?;
+        let payload = match fs::read(&input) {
+            Ok(payload) => payload,
+            Err(error) if ignore_missing && error.kind() == io::ErrorKind::NotFound => {
+                // Keep the table entry and emit an empty FAT range. This is
+                // opt-in because ndstool itself errors when the file is
+                // missing; an existing zero-byte file already works normally.
+                Vec::new()
+            }
+            Err(error) => {
+                return Err(io::Error::new(
+                    error.kind(),
+                    format!("failed to read overlay {}: {error}", input.display()),
+                ))
+            }
+        };
         let start = align(cursor, 0x200);
         rom.resize(start, 0xff);
         rom.extend_from_slice(&payload);
@@ -256,6 +266,7 @@ pub(crate) fn create_with_tree(
     header_template: Option<&Path>,
     layout: filesystem::LayoutMode,
     jobs: usize,
+    ignore_missing_overlays: bool,
 ) -> io::Result<()> {
     let arm9 = elf::load(arm9_path, 0x02000000, 0x02000000)?;
     let arm7 = elf::load(arm7_path, 0x0238_0000, 0x0238_0000)?;
@@ -381,6 +392,7 @@ pub(crate) fn create_with_tree(
             &mut arm9_overlay_size,
             &mut next_file_id,
             &mut overlay_fat,
+            ignore_missing_overlays,
         )?;
     }
 
@@ -414,6 +426,7 @@ pub(crate) fn create_with_tree(
             &mut arm7_overlay_size,
             &mut next_file_id,
             &mut overlay_fat,
+            ignore_missing_overlays,
         )?;
     }
     put32(&mut rom, 0x50, arm9_overlay_offset);

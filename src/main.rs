@@ -46,6 +46,7 @@ fn main() -> io::Result<()> {
         let mut header_template = None;
         let mut layout = filesystem::LayoutMode::Stable;
         let mut jobs = 1usize;
+        let mut ignore_missing_overlays = false;
         let mut i = 2;
         while i < a.len() {
             let mut step = 2;
@@ -63,6 +64,12 @@ fn main() -> io::Result<()> {
                     // Random payload placement is opt-in because it changes
                     // ROM bytes and makes byte-for-byte rebuilds impossible.
                     layout = filesystem::LayoutMode::Random;
+                    step = 1;
+                }
+                "--ignore-missing-overlays" => {
+                    // This is deliberately opt-in: the original ndstool
+                    // reports missing overlay files as an error.
+                    ignore_missing_overlays = true;
                     step = 1;
                 }
                 "--parallel" => {
@@ -128,6 +135,7 @@ fn main() -> io::Result<()> {
             header_template.as_deref(),
             layout,
             jobs,
+            ignore_missing_overlays,
         )?;
         println!("Created {}", rom.display());
         return Ok(());
