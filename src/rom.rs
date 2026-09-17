@@ -208,6 +208,8 @@ pub(crate) fn create_with_tree(
         logo::NINTENDO_LOGO.to_vec()
     };
     rom[0xc0..0xc0 + 156].copy_from_slice(&logo_bytes);
+    let logo_crc = header::crc16(&rom[0xc0..0x15c]);
+    rom[0x15c..0x15e].copy_from_slice(&logo_crc.to_le_bytes());
     put32(&mut rom, 0x20, arm9_offset as u32);
     put32(&mut rom, 0x24, arm9.entry);
     put32(&mut rom, 0x28, arm9.ram);

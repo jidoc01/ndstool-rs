@@ -49,18 +49,23 @@ pub(crate) fn print_info(h: &Header) {
     println!("Title       : {}\nGame code   : {}\nMaker code  : {}\nUnit code   : 0x{:02X}\nDevice cap  : 0x{:02X}\nARM9        : 0x{:08X} ({} bytes, entry 0x{:08X}, RAM 0x{:08X})\nARM7        : 0x{:08X} ({} bytes, entry 0x{:08X}, RAM 0x{:08X})\nFNT         : 0x{:08X} ({} bytes)\nFAT         : 0x{:08X} ({} bytes)\nBanner      : 0x{:08X}", h.title,h.game_code,h.maker_code,h.unit_code,h.device_capacity,h.arm9_offset,h.arm9_size,h.arm9_entry,h.arm9_ram,h.arm7_offset,h.arm7_size,h.arm7_entry,h.arm7_ram,h.fnt_offset,h.fnt_size,h.fat_offset,h.fat_size,h.banner_offset);
 }
 pub(crate) fn crc16(data: &[u8]) -> u16 {
-    let mut crc = 0u16;
+    let mut crc = 0xffffu16;
     for &byte in data {
-        crc ^= (byte as u16) << 8;
-        for _ in 0..8 {
-            crc = if crc & 0x8000 != 0 {
-                (crc << 1) ^ 0x1021
-            } else {
-                crc << 1
-            };
-        }
+        crc = (crc >> 8) ^ crc16_byte(byte ^ (crc as u8));
     }
     crc
+}
+
+fn crc16_byte(index: u8) -> u16 {
+    let mut value = index as u16;
+    for _ in 0..8 {
+        value = if value & 1 != 0 {
+            (value >> 1) ^ 0xA001
+        } else {
+            value >> 1
+        };
+    }
+    value
 }
 pub(crate) fn fix_crc(path: &Path) -> io::Result<()> {
     let mut data = fs::read(path)?;
