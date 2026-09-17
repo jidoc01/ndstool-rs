@@ -180,7 +180,8 @@ pub(crate) fn create_with_tree(
 ) -> io::Result<()> {
     let arm9 = elf::load(arm9_path, 0x02000000, 0x02000000)?;
     let arm7 = elf::load(arm7_path, 0x0238_0000, 0x0238_0000)?;
-    let arm9_offset = 0x200usize;
+    let secure_boot = arm9.entry == arm9.ram.saturating_add(0x800);
+    let arm9_offset = if secure_boot { 0x4000usize } else { 0x200usize };
     let mut rom = vec![0xffu8; arm9_offset + arm9.data.len()];
     rom[..0x200].fill(0);
     let title = title.unwrap_or("NDSTOOL");
@@ -214,6 +215,10 @@ pub(crate) fn create_with_tree(
     put32(&mut rom, 0x24, arm9.entry);
     put32(&mut rom, 0x28, arm9.ram);
     put32(&mut rom, 0x2c, arm9.data.len() as u32);
+    put32(&mut rom, 0x60, 0x0058_6000);
+    put32(&mut rom, 0x64, 0x0018_08F8);
+    rom[0x6e..0x70].copy_from_slice(&0x051Eu16.to_le_bytes());
+    put32(&mut rom, 0x84, if secure_boot { 0x4000 } else { 0x200 });
     rom[arm9_offset..arm9_offset + arm9.data.len()].copy_from_slice(&arm9.data);
 
     let mut arm9_overlay_offset = 0;
@@ -322,6 +327,8 @@ pub(crate) fn create_with_tree(
         (image.fat.len() + (next_file_id as usize) * 8) as u32,
     );
     let size = rom.len().next_power_of_two().max(0x200);
+    let application_end = rom.len() as u32;
+    put32(&mut rom, 0x80, application_end);
     rom.resize(size, 0xff);
     rom[0x14] = (size.trailing_zeros() as u8).saturating_sub(17);
     let crc = header::crc16(&rom[..0x15e]);
