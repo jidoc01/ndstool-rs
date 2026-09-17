@@ -3,6 +3,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod banner;
+mod elf;
 mod filesystem;
 mod header;
 mod model;
@@ -127,12 +129,14 @@ fn main() -> io::Result<()> {
         let mut arm9 = None;
         let mut arm7 = None;
         let mut data = None;
+        let mut banner = None;
         let mut i = 2;
         while i < a.len() {
             match a[i].as_str() {
                 "-9" => arm9 = a.get(i + 1).map(PathBuf::from),
                 "-7" => arm7 = a.get(i + 1).map(PathBuf::from),
                 "-d" => data = a.get(i + 1).map(PathBuf::from),
+                "-t" | "-b" => banner = a.get(i + 1).map(PathBuf::from),
                 other => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
@@ -148,7 +152,11 @@ fn main() -> io::Result<()> {
         let arm7 = arm7.ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "-c requires -7 ARM7.bin")
         })?;
-        create_basic_rom(&rom, &arm9, &arm7, data.as_deref())?;
+        if let Some(root) = data.as_deref() {
+            rom::create_with_tree(&rom, &arm9, &arm7, Some(root), banner.as_deref())?;
+        } else {
+            rom::create_with_tree(&rom, &arm9, &arm7, None, banner.as_deref())?;
+        }
         println!("Created {}", rom.display());
         return Ok(());
     }
@@ -181,6 +189,7 @@ fn main() -> io::Result<()> {
     let mut arm7 = None;
     let mut banner = None;
     let mut logo = None;
+    let mut overlays = None;
     let mut i = 2;
     while i < a.len() {
         let value = |idx: usize| -> io::Result<&str> {
@@ -194,6 +203,7 @@ fn main() -> io::Result<()> {
             "-7" => arm7 = Some(PathBuf::from(value(i + 1)?)),
             "-b" | "-t" => banner = Some(PathBuf::from(value(i + 1)?)),
             "-o" => logo = Some(PathBuf::from(value(i + 1)?)),
+            "-y" => overlays = Some(PathBuf::from(value(i + 1)?)),
             other => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -217,6 +227,22 @@ fn main() -> io::Result<()> {
     }
     if let Some(path) = logo {
         rom::extract_range(&rom, &path, 0xC0, 156)?;
+    }
+    if let Some(path) = overlays {
+        rom::extract_overlays(
+            &rom,
+            h.arm9_overlay_offset,
+            h.arm9_overlay_size,
+            h.fat_offset,
+            &path,
+        )?;
+        rom::extract_overlays(
+            &rom,
+            h.arm7_overlay_offset,
+            h.arm7_overlay_size,
+            h.fat_offset,
+            &path,
+        )?;
     }
     for e in entries {
         let dst = root.join(e.path.trim_start_matches('/'));

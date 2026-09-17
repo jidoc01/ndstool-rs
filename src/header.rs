@@ -39,6 +39,10 @@ pub(crate) fn read(path: &Path) -> io::Result<Header> {
         fnt_size: le32(&b, 0x44),
         fat_offset: le32(&b, 0x48),
         fat_size: le32(&b, 0x4c),
+        arm9_overlay_offset: le32(&b, 0x50),
+        arm9_overlay_size: le32(&b, 0x54),
+        arm7_overlay_offset: le32(&b, 0x58),
+        arm7_overlay_size: le32(&b, 0x5c),
     })
 }
 pub(crate) fn print_info(h: &Header) {
