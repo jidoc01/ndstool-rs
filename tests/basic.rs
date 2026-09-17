@@ -623,6 +623,7 @@ fn create_from_external_overlay_table() {
 fn secure_area_encrypt_decrypt_round_trip() {
     let dir = temp_dir();
     let rom = dir.join("secure.nds");
+    let rom_e = dir.join("secure-E.nds");
     let mut bytes = vec![0xffu8; 0x8000];
     bytes[12..16].copy_from_slice(b"TEST");
     bytes[0x4000..0x4008].fill(0xff);
@@ -630,6 +631,7 @@ fn secure_area_encrypt_decrypt_round_trip() {
     bytes[0x4004..0x4008].copy_from_slice(&0xe7ffdeffu32.to_le_bytes());
     let original = bytes[0x4000..0x4800].to_vec();
     fs::write(&rom, bytes).unwrap();
+    fs::copy(&rom, &rom_e).unwrap();
 
     let bin = env!("CARGO_BIN_EXE_ndstool-rs");
     assert!(Command::new(bin)
@@ -645,5 +647,17 @@ fn secure_area_encrypt_decrypt_round_trip() {
 
     let result = fs::read(&rom).unwrap();
     assert_eq!(&result[0x4000..0x4800], original.as_slice());
+    assert!(Command::new(bin)
+        .args(["-sE", rom_e.to_str().unwrap()])
+        .status()
+        .unwrap()
+        .success());
+    assert!(Command::new(bin)
+        .args(["-sd", rom_e.to_str().unwrap()])
+        .status()
+        .unwrap()
+        .success());
+    let result_e = fs::read(&rom_e).unwrap();
+    assert_eq!(&result_e[0x4000..0x4800], original.as_slice());
     let _ = fs::remove_dir_all(dir);
 }
