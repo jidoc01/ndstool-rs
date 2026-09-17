@@ -4,6 +4,7 @@ use std::{
 };
 
 mod banner;
+mod crypto;
 mod elf;
 mod filesystem;
 mod header;
