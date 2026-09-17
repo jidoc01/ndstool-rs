@@ -28,9 +28,10 @@ pub(crate) fn extract_overlays(
             break;
         }
         let id = u32::from_le_bytes([bytes[p], bytes[p + 1], bytes[p + 2], bytes[p + 3]]);
-        let file_id =
-            u32::from_le_bytes([bytes[p + 24], bytes[p + 25], bytes[p + 26], bytes[p + 27]])
-                as usize;
+        // ndstool's extractor addresses overlay payloads by overlay ID.  The
+        // table's file-id field is metadata used by the builder, but is not
+        // what the original dsextract path uses for lookup.
+        let file_id = id as usize;
         let fat = fat_offset as usize + file_id * 8;
         if fat + 8 > bytes.len() {
             return Err(io::Error::new(

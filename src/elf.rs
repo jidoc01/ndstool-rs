@@ -28,6 +28,14 @@ fn u32le(b: &[u8], p: usize) -> u32 {
 }
 
 fn raw(bytes: Vec<u8>, default_entry: u32, default_ram: u32) -> LoadedImage {
+    let bytes = if bytes.len() >= 12
+        && u32::from_le_bytes(bytes[bytes.len() - 12..bytes.len() - 8].try_into().unwrap())
+            == 0xdec0_0621
+    {
+        bytes[..bytes.len() - 12].to_vec()
+    } else {
+        bytes
+    };
     LoadedImage {
         data: bytes,
         entry: default_entry,

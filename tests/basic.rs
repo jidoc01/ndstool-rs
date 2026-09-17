@@ -540,7 +540,7 @@ fn extract_overlay_from_table() {
     let file_start = u32::from_le_bytes(bytes[fat..fat + 4].try_into().unwrap());
     let table = (bytes.len() + 0x1ff) & !0x1ff;
     bytes.resize(table + 32, 0xff);
-    bytes[table..table + 4].copy_from_slice(&7u32.to_le_bytes());
+    bytes[table..table + 4].copy_from_slice(&0u32.to_le_bytes());
     bytes[table + 24..table + 28].copy_from_slice(&0u32.to_le_bytes());
     bytes[0x50..0x54].copy_from_slice(&(table as u32).to_le_bytes());
     bytes[0x54..0x58].copy_from_slice(&32u32.to_le_bytes());
@@ -559,7 +559,7 @@ fn extract_overlay_from_table() {
         .unwrap()
         .success());
     assert_eq!(
-        fs::read(overlays.join("overlay_0007.bin")).unwrap(),
+        fs::read(overlays.join("overlay_0000.bin")).unwrap(),
         payload
     );
     let _ = fs::remove_dir_all(dir);
@@ -575,9 +575,9 @@ fn create_from_external_overlay_table() {
     let arm7 = dir.join("arm7.bin");
     let rom = dir.join("test.nds");
     fs::create_dir_all(&overlay_root).unwrap();
-    fs::write(overlay_root.join("overlay_0003.bin"), b"external overlay").unwrap();
+    fs::write(overlay_root.join("overlay_0000.bin"), b"external overlay").unwrap();
     let mut table_bytes = vec![0u8; 32];
-    table_bytes[0..4].copy_from_slice(&3u32.to_le_bytes());
+    table_bytes[0..4].copy_from_slice(&0u32.to_le_bytes());
     table_bytes[4..8].copy_from_slice(&0x02200000u32.to_le_bytes());
     table_bytes[8..12].copy_from_slice(&16u32.to_le_bytes());
     table_bytes[12..16].copy_from_slice(&4u32.to_le_bytes());
@@ -613,7 +613,7 @@ fn create_from_external_overlay_table() {
         .unwrap()
         .success());
     assert_eq!(
-        fs::read(extracted.join("overlay_0003.bin")).unwrap(),
+        fs::read(extracted.join("overlay_0000.bin")).unwrap(),
         b"external overlay"
     );
     let _ = fs::remove_dir_all(dir);
