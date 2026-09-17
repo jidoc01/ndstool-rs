@@ -123,8 +123,7 @@ pub(crate) fn create_with_tree(
     let arm9 = elf::load(arm9_path, 0x02000000, 0x02000000)?;
     let arm7 = elf::load(arm7_path, 0x037f8000, 0x037f8000)?;
     let arm9_offset = 0x200usize;
-    let arm7_offset = 0x8000usize;
-    let mut rom = vec![0xffu8; (arm7_offset + arm7.data.len()).max(arm9_offset + arm9.data.len())];
+    let mut rom = vec![0xffu8; arm9_offset + arm9.data.len()];
     rom[..0x200].fill(0);
     rom[0..8].copy_from_slice(b"NDSTOOL ");
     rom[12..16].copy_from_slice(b"####");
@@ -143,12 +142,8 @@ pub(crate) fn create_with_tree(
     put32(&mut rom, 0x24, arm9.entry);
     put32(&mut rom, 0x28, arm9.ram);
     put32(&mut rom, 0x2c, arm9.data.len() as u32);
-    put32(&mut rom, 0x30, arm7_offset as u32);
-    put32(&mut rom, 0x34, arm7.entry);
-    put32(&mut rom, 0x38, arm7.ram);
-    put32(&mut rom, 0x3c, arm7.data.len() as u32);
     rom[arm9_offset..arm9_offset + arm9.data.len()].copy_from_slice(&arm9.data);
-    rom[arm7_offset..arm7_offset + arm7.data.len()].copy_from_slice(&arm7.data);
+
     let mut arm9_overlay_offset = 0;
     let mut arm9_overlay_size = 0;
     let mut arm7_overlay_offset = 0;
@@ -163,6 +158,14 @@ pub(crate) fn create_with_tree(
         &mut next_file_id,
         &mut overlay_fat,
     )?;
+
+    let arm7_offset = align(rom.len().max(0x8000), 0x200);
+    rom.resize(arm7_offset + arm7.data.len(), 0xff);
+    put32(&mut rom, 0x30, arm7_offset as u32);
+    put32(&mut rom, 0x34, arm7.entry);
+    put32(&mut rom, 0x38, arm7.ram);
+    put32(&mut rom, 0x3c, arm7.data.len() as u32);
+    rom[arm7_offset..arm7_offset + arm7.data.len()].copy_from_slice(&arm7.data);
     write_overlays(
         &mut rom,
         &arm7.overlays,

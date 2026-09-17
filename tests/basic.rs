@@ -52,6 +52,43 @@ fn create_and_inspect_basic_rom() {
 }
 
 #[test]
+fn places_arm7_after_large_arm9() {
+    let dir = temp_dir();
+    let arm9 = dir.join("large-arm9.bin");
+    let arm7 = dir.join("arm7.bin");
+    let rom = dir.join("test.nds");
+    let out7 = dir.join("out7.bin");
+    fs::write(&arm9, vec![0x9au8; 0x9000]).unwrap();
+    fs::write(&arm7, [5u8, 6, 7]).unwrap();
+    let bin = env!("CARGO_BIN_EXE_ndstool-rs");
+    assert!(Command::new(bin)
+        .args([
+            "-c",
+            rom.to_str().unwrap(),
+            "-9",
+            arm9.to_str().unwrap(),
+            "-7",
+            arm7.to_str().unwrap()
+        ])
+        .status()
+        .unwrap()
+        .success());
+    let inspected = Command::new(bin)
+        .args(["-i", rom.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&inspected.stdout);
+    assert!(stdout.contains("ARM7        : 0x00009200"));
+    assert!(Command::new(bin)
+        .args(["-x", rom.to_str().unwrap(), "-7", out7.to_str().unwrap()])
+        .status()
+        .unwrap()
+        .success());
+    assert_eq!(fs::read(out7).unwrap(), [5, 6, 7]);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn extract_arm_binaries() {
     let dir = temp_dir();
     let arm9 = dir.join("arm9.bin");
