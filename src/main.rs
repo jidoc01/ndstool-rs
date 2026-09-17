@@ -36,6 +36,9 @@ fn main() -> io::Result<()> {
         let mut data = None;
         let mut banner = None;
         let mut logo = None;
+        let mut arm9_overlay_table = None;
+        let mut arm7_overlay_table = None;
+        let mut overlay_root = None;
         let mut i = 2;
         while i < a.len() {
             match a[i].as_str() {
@@ -44,6 +47,9 @@ fn main() -> io::Result<()> {
                 "-d" => data = a.get(i + 1).map(PathBuf::from),
                 "-t" | "-b" => banner = a.get(i + 1).map(PathBuf::from),
                 "-o" => logo = a.get(i + 1).map(PathBuf::from),
+                "-y9" => arm9_overlay_table = a.get(i + 1).map(PathBuf::from),
+                "-y7" => arm7_overlay_table = a.get(i + 1).map(PathBuf::from),
+                "-y" => overlay_root = a.get(i + 1).map(PathBuf::from),
                 other => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
@@ -67,9 +73,22 @@ fn main() -> io::Result<()> {
                 Some(root),
                 banner.as_deref(),
                 logo.as_deref(),
+                arm9_overlay_table.as_deref(),
+                arm7_overlay_table.as_deref(),
+                overlay_root.as_deref(),
             )?;
         } else {
-            rom::create_with_tree(&rom, &arm9, &arm7, None, banner.as_deref(), logo.as_deref())?;
+            rom::create_with_tree(
+                &rom,
+                &arm9,
+                &arm7,
+                None,
+                banner.as_deref(),
+                logo.as_deref(),
+                arm9_overlay_table.as_deref(),
+                arm7_overlay_table.as_deref(),
+                overlay_root.as_deref(),
+            )?;
         }
         println!("Created {}", rom.display());
         return Ok(());

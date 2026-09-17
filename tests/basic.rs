@@ -559,6 +559,60 @@ fn extract_overlay_from_table() {
 }
 
 #[test]
+fn create_from_external_overlay_table() {
+    let dir = temp_dir();
+    let overlay_root = dir.join("overlay-input");
+    let extracted = dir.join("overlay-output");
+    let table = dir.join("arm9.tbl");
+    let arm9 = dir.join("arm9.bin");
+    let arm7 = dir.join("arm7.bin");
+    let rom = dir.join("test.nds");
+    fs::create_dir_all(&overlay_root).unwrap();
+    fs::write(overlay_root.join("overlay_0003.bin"), b"external overlay").unwrap();
+    let mut table_bytes = vec![0u8; 32];
+    table_bytes[0..4].copy_from_slice(&3u32.to_le_bytes());
+    table_bytes[4..8].copy_from_slice(&0x02200000u32.to_le_bytes());
+    table_bytes[8..12].copy_from_slice(&16u32.to_le_bytes());
+    table_bytes[12..16].copy_from_slice(&4u32.to_le_bytes());
+    fs::write(&table, table_bytes).unwrap();
+    fs::write(&arm9, [1u8]).unwrap();
+    fs::write(&arm7, [2u8]).unwrap();
+
+    let bin = env!("CARGO_BIN_EXE_ndstool-rs");
+    assert!(Command::new(bin)
+        .args([
+            "-c",
+            rom.to_str().unwrap(),
+            "-9",
+            arm9.to_str().unwrap(),
+            "-7",
+            arm7.to_str().unwrap(),
+            "-y9",
+            table.to_str().unwrap(),
+            "-y",
+            overlay_root.to_str().unwrap()
+        ])
+        .status()
+        .unwrap()
+        .success());
+    assert!(Command::new(bin)
+        .args([
+            "-x",
+            rom.to_str().unwrap(),
+            "-y",
+            extracted.to_str().unwrap()
+        ])
+        .status()
+        .unwrap()
+        .success());
+    assert_eq!(
+        fs::read(extracted.join("overlay_0003.bin")).unwrap(),
+        b"external overlay"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn secure_area_encrypt_decrypt_round_trip() {
     let dir = temp_dir();
     let rom = dir.join("secure.nds");

@@ -112,6 +112,57 @@ fn write_overlays(
     Ok(())
 }
 
+fn write_external_overlays(
+    rom: &mut Vec<u8>,
+    table_path: &Path,
+    overlay_root: Option<&Path>,
+    table_offset_field: &mut u32,
+    table_size_field: &mut u32,
+    next_file_id: &mut u16,
+    fat: &mut Vec<(u32, u32)>,
+) -> io::Result<()> {
+    let table = fs::read(table_path)?;
+    if table.is_empty() || table.len() % 32 != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "overlay table size must be a non-zero multiple of 32",
+        ));
+    }
+    let root = overlay_root.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "an overlay directory is required with -y9 or -y7",
+        )
+    })?;
+    let table_offset = align(rom.len(), 0x200);
+    rom.resize(table_offset + table.len(), 0xff);
+    rom[table_offset..table_offset + table.len()].copy_from_slice(&table);
+    let mut cursor = table_offset + table.len();
+    for p in (0..table.len()).step_by(32) {
+        let id = u32::from_le_bytes(table[p..p + 4].try_into().unwrap());
+        let file_id = *next_file_id as u32;
+        *next_file_id = next_file_id
+            .checked_add(1)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "too many overlay files"))?;
+        let input = root.join(format!("overlay_{id:04}.bin"));
+        let payload = fs::read(&input).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("failed to read overlay {}: {error}", input.display()),
+            )
+        })?;
+        let start = align(cursor, 0x200);
+        rom.resize(start, 0xff);
+        rom.extend_from_slice(&payload);
+        cursor = start + payload.len();
+        fat.push((start as u32, cursor as u32));
+        put32(rom, table_offset + p + 24, file_id);
+    }
+    *table_offset_field = table_offset as u32;
+    *table_size_field = table.len() as u32;
+    Ok(())
+}
+
 pub(crate) fn create_with_tree(
     out: &Path,
     arm9_path: &Path,
@@ -119,6 +170,9 @@ pub(crate) fn create_with_tree(
     data_root: Option<&Path>,
     banner_path: Option<&Path>,
     logo_path: Option<&Path>,
+    arm9_overlay_table: Option<&Path>,
+    arm7_overlay_table: Option<&Path>,
+    overlay_root: Option<&Path>,
 ) -> io::Result<()> {
     let arm9 = elf::load(arm9_path, 0x02000000, 0x02000000)?;
     let arm7 = elf::load(arm7_path, 0x037f8000, 0x037f8000)?;
@@ -158,6 +212,23 @@ pub(crate) fn create_with_tree(
         &mut next_file_id,
         &mut overlay_fat,
     )?;
+    if arm9_overlay_table.is_some() && !arm9.overlays.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "cannot combine ARM9 ELF overlays and an external overlay table",
+        ));
+    }
+    if let Some(table) = arm9_overlay_table {
+        write_external_overlays(
+            &mut rom,
+            table,
+            overlay_root,
+            &mut arm9_overlay_offset,
+            &mut arm9_overlay_size,
+            &mut next_file_id,
+            &mut overlay_fat,
+        )?;
+    }
 
     let arm7_offset = align(rom.len().max(0x8000), 0x200);
     rom.resize(arm7_offset + arm7.data.len(), 0xff);
@@ -174,6 +245,23 @@ pub(crate) fn create_with_tree(
         &mut next_file_id,
         &mut overlay_fat,
     )?;
+    if arm7_overlay_table.is_some() && !arm7.overlays.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "cannot combine ARM7 ELF overlays and an external overlay table",
+        ));
+    }
+    if let Some(table) = arm7_overlay_table {
+        write_external_overlays(
+            &mut rom,
+            table,
+            overlay_root,
+            &mut arm7_overlay_offset,
+            &mut arm7_overlay_size,
+            &mut next_file_id,
+            &mut overlay_fat,
+        )?;
+    }
     put32(&mut rom, 0x50, arm9_overlay_offset);
     put32(&mut rom, 0x54, arm9_overlay_size);
     put32(&mut rom, 0x58, arm7_overlay_offset);
