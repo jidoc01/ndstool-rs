@@ -4,7 +4,68 @@ use std::{
     fs::File,
     io::{self, Read, Seek, SeekFrom},
     path::Path,
+    thread,
 };
+
+struct CopyTask {
+    path: std::path::PathBuf,
+    start: usize,
+    end: usize,
+}
+
+fn write_tasks(bytes: &[u8], tasks: Vec<CopyTask>, jobs: usize) -> io::Result<()> {
+    if jobs <= 1 || tasks.len() <= 1 {
+        for task in tasks {
+            fs::write(task.path, &bytes[task.start..task.end])?;
+        }
+        return Ok(());
+    }
+    let worker_count = jobs.min(tasks.len());
+    let chunk_size = tasks.len().div_ceil(worker_count);
+    thread::scope(|scope| {
+        let mut handles = Vec::new();
+        for chunk in tasks.chunks(chunk_size) {
+            handles.push(scope.spawn(move || -> io::Result<()> {
+                for task in chunk {
+                    fs::write(&task.path, &bytes[task.start..task.end])?;
+                }
+                Ok(())
+            }));
+        }
+        for handle in handles {
+            handle
+                .join()
+                .map_err(|_| io::Error::other("parallel extraction worker panicked"))??;
+        }
+        Ok(())
+    })
+}
+
+pub(crate) fn extract_entries(
+    rom: &Path,
+    entries: &[crate::model::Entry],
+    root: &Path,
+    jobs: usize,
+) -> io::Result<()> {
+    let bytes = fs::read(rom)?;
+    let mut tasks = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let path = root.join(entry.path.trim_start_matches('/'));
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let start = entry.start as usize;
+        let end = entry.end as usize;
+        if start > end || end > bytes.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("invalid FAT range for {}", entry.path),
+            ));
+        }
+        tasks.push(CopyTask { path, start, end });
+    }
+    write_tasks(&bytes, tasks, jobs)
+}
 
 pub(crate) fn extract_range(rom: &Path, out: &Path, offset: u32, size: u32) -> io::Result<()> {
     let mut f = File::open(rom)?;
@@ -20,9 +81,11 @@ pub(crate) fn extract_overlays(
     table_size: u32,
     fat_offset: u32,
     out_dir: &Path,
+    jobs: usize,
 ) -> io::Result<()> {
     fs::create_dir_all(out_dir)?;
     let bytes = fs::read(rom)?;
+    let mut tasks = Vec::new();
     for p in (table_offset as usize..(table_offset + table_size) as usize).step_by(32) {
         if p + 32 > bytes.len() {
             break;
@@ -53,12 +116,13 @@ pub(crate) fn extract_overlays(
                 "overlay FAT range is invalid",
             ));
         }
-        fs::write(
-            out_dir.join(format!("overlay_{id:04}.bin")),
-            &bytes[start..end],
-        )?;
+        tasks.push(CopyTask {
+            path: out_dir.join(format!("overlay_{id:04}.bin")),
+            start,
+            end,
+        });
     }
-    Ok(())
+    write_tasks(&bytes, tasks, jobs)
 }
 
 fn put32(data: &mut [u8], p: usize, v: u32) {

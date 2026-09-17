@@ -129,8 +129,10 @@ fn main() -> io::Result<()> {
     let mut banner = None;
     let mut logo = None;
     let mut overlays = None;
+    let mut jobs = 1usize;
     let mut i = 2;
     while i < a.len() {
+        let mut step = 2;
         let value = |idx: usize| -> io::Result<&str> {
             a.get(idx)
                 .map(String::as_str)
@@ -143,6 +145,23 @@ fn main() -> io::Result<()> {
             "-b" | "-t" => banner = Some(PathBuf::from(value(i + 1)?)),
             "-o" => logo = Some(PathBuf::from(value(i + 1)?)),
             "-y" => overlays = Some(PathBuf::from(value(i + 1)?)),
+            "--parallel" => {
+                jobs = std::thread::available_parallelism()
+                    .map(|n| n.get())
+                    .unwrap_or(1);
+                step = 1;
+            }
+            "--jobs" => {
+                let value = value(i + 1)?;
+                jobs = value.parse().map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "--jobs requires a number")
+                })?;
+                if jobs == 0 {
+                    jobs = std::thread::available_parallelism()
+                        .map(|n| n.get())
+                        .unwrap_or(1);
+                }
+            }
             other => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -150,7 +169,7 @@ fn main() -> io::Result<()> {
                 ))
             }
         }
-        i += 2;
+        i += step;
     }
     if arm9.is_none() && arm7.is_none() && banner.is_none() && logo.is_none() {
         fs::create_dir_all(&root)?;
@@ -174,6 +193,7 @@ fn main() -> io::Result<()> {
             h.arm9_overlay_size,
             h.fat_offset,
             &path,
+            jobs,
         )?;
         rom::extract_overlays(
             &rom,
@@ -181,14 +201,9 @@ fn main() -> io::Result<()> {
             h.arm7_overlay_size,
             h.fat_offset,
             &path,
+            jobs,
         )?;
     }
-    for e in entries {
-        let dst = root.join(e.path.trim_start_matches('/'));
-        if let Some(p) = dst.parent() {
-            fs::create_dir_all(p)?;
-        }
-        rom::extract_range(&rom, &dst, e.start, e.end - e.start)?;
-    }
+    rom::extract_entries(&rom, &entries, &root, jobs)?;
     Ok(())
 }
