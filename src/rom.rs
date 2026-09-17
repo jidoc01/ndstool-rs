@@ -64,6 +64,54 @@ fn put32(data: &mut [u8], p: usize, v: u32) {
     data[p..p + 4].copy_from_slice(&v.to_le_bytes());
 }
 
+fn align(value: usize, boundary: usize) -> usize {
+    (value + boundary - 1) & !(boundary - 1)
+}
+
+fn write_overlays(
+    rom: &mut Vec<u8>,
+    overlays: &[elf::Overlay],
+    table_offset_field: &mut u32,
+    table_size_field: &mut u32,
+    next_file_id: &mut u16,
+    fat: &mut Vec<(u32, u32)>,
+) -> io::Result<()> {
+    if overlays.is_empty() {
+        return Ok(());
+    }
+    let table_offset = align(rom.len(), 0x200);
+    let table_size = overlays
+        .len()
+        .checked_mul(32)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "overlay table is too large"))?;
+    rom.resize(table_offset + table_size, 0xff);
+    let mut cursor = table_offset + table_size;
+    for (index, overlay) in overlays.iter().enumerate() {
+        let file_id = *next_file_id as u32;
+        *next_file_id = next_file_id
+            .checked_add(1)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "too many overlay files"))?;
+        let start = align(cursor, 0x200);
+        rom.resize(start, 0xff);
+        rom.extend_from_slice(&overlay.data);
+        cursor = start + overlay.data.len();
+        fat.push((start as u32, cursor as u32));
+
+        let p = table_offset + index * 32;
+        put32(rom, p, index as u32);
+        put32(rom, p + 4, overlay.ram);
+        put32(rom, p + 8, overlay.load_size);
+        put32(rom, p + 12, overlay.bss_size);
+        put32(rom, p + 16, overlay.ctors_start);
+        put32(rom, p + 20, overlay.ctors_end);
+        put32(rom, p + 24, file_id);
+        put32(rom, p + 28, 0);
+    }
+    *table_offset_field = table_offset as u32;
+    *table_size_field = table_size as u32;
+    Ok(())
+}
+
 pub(crate) fn create_with_tree(
     out: &Path,
     arm9_path: &Path,
@@ -90,6 +138,32 @@ pub(crate) fn create_with_tree(
     put32(&mut rom, 0x3c, arm7.data.len() as u32);
     rom[arm9_offset..arm9_offset + arm9.data.len()].copy_from_slice(&arm9.data);
     rom[arm7_offset..arm7_offset + arm7.data.len()].copy_from_slice(&arm7.data);
+    let mut arm9_overlay_offset = 0;
+    let mut arm9_overlay_size = 0;
+    let mut arm7_overlay_offset = 0;
+    let mut arm7_overlay_size = 0;
+    let mut next_file_id = 0u16;
+    let mut overlay_fat = Vec::new();
+    write_overlays(
+        &mut rom,
+        &arm9.overlays,
+        &mut arm9_overlay_offset,
+        &mut arm9_overlay_size,
+        &mut next_file_id,
+        &mut overlay_fat,
+    )?;
+    write_overlays(
+        &mut rom,
+        &arm7.overlays,
+        &mut arm7_overlay_offset,
+        &mut arm7_overlay_size,
+        &mut next_file_id,
+        &mut overlay_fat,
+    )?;
+    put32(&mut rom, 0x50, arm9_overlay_offset);
+    put32(&mut rom, 0x54, arm9_overlay_size);
+    put32(&mut rom, 0x58, arm7_overlay_offset);
+    put32(&mut rom, 0x5c, arm7_overlay_size);
     if let Some(path) = banner_path {
         let banner = banner::load(path)?;
         if banner.is_empty() || banner.len() > 0x23c0 {
@@ -103,27 +177,30 @@ pub(crate) fn create_with_tree(
         rom.extend_from_slice(&banner);
         put32(&mut rom, 0x68, offset as u32);
     }
-    let base = ((rom.len() + 0x1ff) & !0x1ff) as u32;
-    let Some(root) = data_root else {
-        let size = rom.len().next_power_of_two().max(0x200);
-        rom.resize(size, 0xff);
-        rom[0x14] = (size.trailing_zeros() as u8).saturating_sub(17);
-        let crc = header::crc16(&rom[..0x15e]);
-        rom[0x15e..0x160].copy_from_slice(&crc.to_le_bytes());
-        return fs::write(out, rom);
+    let base = align(rom.len(), 0x200) as u32;
+    let image = match data_root {
+        Some(root) => filesystem::build_image(root, base, next_file_id)?,
+        None => filesystem::empty_image(next_file_id),
     };
-    let image = filesystem::build_image(root, base)?;
     rom.resize(base as usize, 0xff);
     rom.extend_from_slice(&image.data);
     let fnt_offset = rom.len() as u32;
     rom.extend_from_slice(&image.fnt);
     let fat_offset = ((rom.len() + 3) & !3) as u32;
     rom.resize(fat_offset as usize, 0xff);
+    for (start, end) in overlay_fat {
+        rom.extend_from_slice(&start.to_le_bytes());
+        rom.extend_from_slice(&end.to_le_bytes());
+    }
     rom.extend_from_slice(&image.fat);
     put32(&mut rom, 0x40, fnt_offset);
     put32(&mut rom, 0x44, image.fnt.len() as u32);
     put32(&mut rom, 0x48, fat_offset);
-    put32(&mut rom, 0x4c, image.fat.len() as u32);
+    put32(
+        &mut rom,
+        0x4c,
+        (image.fat.len() + (next_file_id as usize) * 8) as u32,
+    );
     let size = rom.len().next_power_of_two().max(0x200);
     rom.resize(size, 0xff);
     rom[0x14] = (size.trailing_zeros() as u8).saturating_sub(17);

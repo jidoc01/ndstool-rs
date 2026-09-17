@@ -224,6 +224,9 @@ fn create_from_elf32_load_segment() {
     bytes[0..4].copy_from_slice(b"\x7fELF");
     bytes[4] = 1;
     bytes[5] = 1;
+    bytes[16..18].copy_from_slice(&2u16.to_le_bytes());
+    bytes[18..20].copy_from_slice(&40u16.to_le_bytes());
+    bytes[20..24].copy_from_slice(&1u32.to_le_bytes());
     bytes[24..28].copy_from_slice(&0x02000004u32.to_le_bytes());
     bytes[28..32].copy_from_slice(&52u32.to_le_bytes());
     bytes[42..44].copy_from_slice(&32u16.to_le_bytes());
@@ -255,6 +258,90 @@ fn create_from_elf32_load_segment() {
         .unwrap();
     let stdout = String::from_utf8_lossy(&inspected.stdout);
     assert!(stdout.contains("entry 0x02000004"));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn create_from_elf32_overlay_segments() {
+    let dir = temp_dir();
+    let elf9 = dir.join("arm9-overlays.elf");
+    let arm7 = dir.join("arm7.bin");
+    let rom = dir.join("test.nds");
+    let overlays = dir.join("overlays");
+    let mut bytes = vec![0u8; 168];
+    bytes[0..4].copy_from_slice(b"\x7fELF");
+    bytes[4] = 1;
+    bytes[5] = 1;
+    bytes[16..18].copy_from_slice(&2u16.to_le_bytes());
+    bytes[18..20].copy_from_slice(&40u16.to_le_bytes());
+    bytes[20..24].copy_from_slice(&1u32.to_le_bytes());
+    bytes[24..28].copy_from_slice(&0x02000000u32.to_le_bytes());
+    bytes[28..32].copy_from_slice(&52u32.to_le_bytes());
+    bytes[40..42].copy_from_slice(&52u16.to_le_bytes());
+    bytes[42..44].copy_from_slice(&32u16.to_le_bytes());
+    bytes[44..46].copy_from_slice(&3u16.to_le_bytes());
+
+    // Normal ARM9 segment.
+    bytes[52..56].copy_from_slice(&1u32.to_le_bytes());
+    bytes[56..60].copy_from_slice(&148u32.to_le_bytes());
+    bytes[60..64].copy_from_slice(&0x02000000u32.to_le_bytes());
+    bytes[64..68].copy_from_slice(&0x02000000u32.to_le_bytes());
+    bytes[68..72].copy_from_slice(&4u32.to_le_bytes());
+    bytes[72..76].copy_from_slice(&4u32.to_le_bytes());
+    bytes[76..80].copy_from_slice(&5u32.to_le_bytes());
+
+    // Overlay table segment: one short entry.
+    bytes[84..88].copy_from_slice(&1u32.to_le_bytes());
+    bytes[88..92].copy_from_slice(&152u32.to_le_bytes());
+    bytes[92..96].copy_from_slice(&0u32.to_le_bytes());
+    bytes[96..100].copy_from_slice(&0u32.to_le_bytes());
+    bytes[100..104].copy_from_slice(&12u32.to_le_bytes());
+    bytes[104..108].copy_from_slice(&12u32.to_le_bytes());
+    bytes[108..112].copy_from_slice(&0x0020_0000u32.to_le_bytes());
+
+    // Overlay payload segment.
+    bytes[116..120].copy_from_slice(&1u32.to_le_bytes());
+    bytes[120..124].copy_from_slice(&164u32.to_le_bytes());
+    bytes[124..128].copy_from_slice(&0x02200000u32.to_le_bytes());
+    bytes[128..132].copy_from_slice(&0x02200000u32.to_le_bytes());
+    bytes[132..136].copy_from_slice(&4u32.to_le_bytes());
+    bytes[136..140].copy_from_slice(&8u32.to_le_bytes());
+    bytes[140..144].copy_from_slice(&0x0020_0000u32.to_le_bytes());
+
+    bytes[148..152].copy_from_slice(&[9, 8, 7, 6]);
+    bytes[152..156].copy_from_slice(&0x11111111u32.to_le_bytes());
+    bytes[156..160].copy_from_slice(&0x22222222u32.to_le_bytes());
+    bytes[164..168].copy_from_slice(b"OVL!");
+    fs::write(&elf9, bytes).unwrap();
+    fs::write(&arm7, [1u8]).unwrap();
+
+    let bin = env!("CARGO_BIN_EXE_ndstool-rs");
+    assert!(Command::new(bin)
+        .args([
+            "-c",
+            rom.to_str().unwrap(),
+            "-9",
+            elf9.to_str().unwrap(),
+            "-7",
+            arm7.to_str().unwrap()
+        ])
+        .status()
+        .unwrap()
+        .success());
+    assert!(Command::new(bin)
+        .args([
+            "-x",
+            rom.to_str().unwrap(),
+            "-y",
+            overlays.to_str().unwrap()
+        ])
+        .status()
+        .unwrap()
+        .success());
+    assert_eq!(
+        fs::read(overlays.join("overlay_0000.bin")).unwrap(),
+        b"OVL!"
+    );
     let _ = fs::remove_dir_all(dir);
 }
 

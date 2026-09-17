@@ -88,7 +88,11 @@ fn insert(node: &mut Node, parts: &[&str], data: Vec<u8>) {
     );
 }
 
-pub(crate) fn build_image(root: &Path, base_offset: u32) -> io::Result<FsImage> {
+pub(crate) fn build_image(
+    root: &Path,
+    base_offset: u32,
+    first_file_id: u16,
+) -> io::Result<FsImage> {
     fn scan(root: &Path, dir: &mut Node, prefix: &str) -> io::Result<()> {
         for item in std::fs::read_dir(root)? {
             let item = item?;
@@ -150,7 +154,7 @@ pub(crate) fn build_image(root: &Path, base_offset: u32) -> io::Result<FsImage> 
             );
         }
     }
-    let mut file_id = 0u16;
+    let mut file_id = first_file_id;
     let mut next_dir = 1u16;
     encode(
         &root_node,
@@ -184,4 +188,17 @@ pub(crate) fn build_image(root: &Path, base_offset: u32) -> io::Result<FsImage> 
         fat.extend_from_slice(&cursor.to_le_bytes());
     }
     Ok(FsImage { data, fnt, fat })
+}
+
+pub(crate) fn empty_image(first_file_id: u16) -> FsImage {
+    let mut fnt = vec![0u8; 8 + 1];
+    fnt[0..4].copy_from_slice(&8u32.to_le_bytes());
+    fnt[4..6].copy_from_slice(&first_file_id.to_le_bytes());
+    fnt[6..8].copy_from_slice(&0u16.to_le_bytes());
+    fnt[8] = 0;
+    FsImage {
+        data: Vec::new(),
+        fnt,
+        fat: Vec::new(),
+    }
 }
