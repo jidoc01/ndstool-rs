@@ -188,10 +188,16 @@ fn write_external_overlays(
     ignore_missing: bool,
 ) -> io::Result<()> {
     let table = fs::read(table_path)?;
-    if table.is_empty() || table.len() % 32 != 0 {
+    // ndstool accepts an existing zero-byte overlay table as "no overlays".
+    // Keep that compatibility behavior distinct from a malformed non-empty
+    // table, which must still be rejected.
+    if table.is_empty() {
+        return Ok(());
+    }
+    if table.len() % 32 != 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "overlay table size must be a non-zero multiple of 32",
+            "overlay table size must be a multiple of 32",
         ));
     }
     let root = overlay_root.ok_or_else(|| {

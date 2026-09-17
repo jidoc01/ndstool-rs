@@ -657,6 +657,36 @@ fn create_from_external_overlay_table() {
 }
 
 #[test]
+fn create_accepts_empty_external_overlay_table() {
+    let dir = temp_dir();
+    let table = dir.join("empty.tbl");
+    fs::write(&table, []).unwrap();
+    let arm9 = dir.join("arm9.bin");
+    let arm7 = dir.join("arm7.bin");
+    let rom = dir.join("empty-table.nds");
+    fs::write(&arm9, [1u8]).unwrap();
+    fs::write(&arm7, [2u8]).unwrap();
+
+    let bin = env!("CARGO_BIN_EXE_ndstool-rs");
+    assert!(Command::new(bin)
+        .args([
+            "-c",
+            rom.to_str().unwrap(),
+            "-9",
+            arm9.to_str().unwrap(),
+            "-7",
+            arm7.to_str().unwrap(),
+            "-y9",
+            table.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap()
+        .success());
+    assert!(rom.exists());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn secure_area_encrypt_decrypt_round_trip() {
     let dir = temp_dir();
     let rom = dir.join("secure.nds");
