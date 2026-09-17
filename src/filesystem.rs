@@ -1,9 +1,10 @@
 use crate::model::{Entry, Header};
 use std::{
     collections::BTreeMap,
-    fs::File,
+    fs::{self, File},
     io::{self, Read, Seek, SeekFrom},
     path::Path,
+    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
 fn le16(b: &[u8], p: usize) -> u16 {
@@ -67,7 +68,7 @@ pub(crate) fn read_entries(path: &Path, h: &Header) -> io::Result<Vec<Entry>> {
 
 #[derive(Default)]
 struct Node {
-    files: BTreeMap<String, Vec<u8>>,
+    files: BTreeMap<String, std::path::PathBuf>,
     dirs: BTreeMap<String, Node>,
 }
 
@@ -84,15 +85,15 @@ pub(crate) enum LayoutMode {
     Random,
 }
 
-fn insert(node: &mut Node, parts: &[&str], data: Vec<u8>) {
+fn insert(node: &mut Node, parts: &[&str], path: std::path::PathBuf) {
     if parts.len() == 1 {
-        node.files.insert(parts[0].to_string(), data);
+        node.files.insert(parts[0].to_string(), path);
         return;
     }
     insert(
         node.dirs.entry(parts[0].to_string()).or_default(),
         &parts[1..],
-        data,
+        path,
     );
 }
 
@@ -101,6 +102,7 @@ pub(crate) fn build_image(
     base_offset: u32,
     first_file_id: u16,
     layout: LayoutMode,
+    jobs: usize,
 ) -> io::Result<FsImage> {
     fn scan(root: &Path, dir: &mut Node, prefix: &str) -> io::Result<()> {
         for item in std::fs::read_dir(root)? {
@@ -113,7 +115,10 @@ pub(crate) fn build_image(
             if item.file_type()?.is_dir() {
                 scan(&path, dir.dirs.entry(name).or_default(), prefix)?;
             } else if item.file_type()?.is_file() {
-                insert(dir, &[&name], std::fs::read(path)?);
+                // Keep paths during the directory scan. The actual reads are
+                // performed after FNT IDs are assigned, which lets us read
+                // independent files concurrently without changing their IDs.
+                insert(dir, &[&name], path);
             }
         }
         let _ = prefix;
@@ -132,7 +137,7 @@ pub(crate) fn build_image(
         next_dir: &mut u16,
         names: &mut Vec<u8>,
         infos: &mut Vec<(u32, u16, u16)>,
-        ordered: &mut Vec<(u16, Vec<u8>)>,
+        ordered: &mut Vec<(u16, std::path::PathBuf)>,
     ) {
         let idx = (id & 0x0fff) as usize;
         if infos.len() <= idx {
@@ -146,12 +151,12 @@ pub(crate) fn build_image(
                 .cmp(&b.to_ascii_lowercase())
                 .then_with(|| a.cmp(b))
         });
-        for (name, data) in files {
+        for (name, path) in files {
             names.push(name.len() as u8);
             names.extend_from_slice(name.as_bytes());
             // FNT traversal owns the file ID. It must remain stable even when
             // the physical payload order is randomized below.
-            ordered.push((*file_id, data.clone()));
+            ordered.push((*file_id, path.clone()));
             *file_id += 1;
         }
         let mut child_ids = Vec::new();
@@ -189,6 +194,7 @@ pub(crate) fn build_image(
         &mut infos,
         &mut ordered,
     );
+    let ordered = read_inputs(ordered, jobs)?;
     let table_size = infos.len() * 8;
     let mut fnt = vec![0u8; table_size + names.len()];
     for (i, (start, first, parent)) in infos.iter().enumerate() {
@@ -237,6 +243,54 @@ pub(crate) fn build_image(
         fat[local_id * 8 + 4..local_id * 8 + 8].copy_from_slice(&cursor.to_le_bytes());
     }
     Ok(FsImage { data, fnt, fat })
+}
+
+fn read_inputs(
+    inputs: Vec<(u16, std::path::PathBuf)>,
+    jobs: usize,
+) -> io::Result<Vec<(u16, Vec<u8>)>> {
+    if jobs <= 1 || inputs.len() <= 1 {
+        return inputs
+            .into_iter()
+            .map(|(id, path)| {
+                fs::read(&path).map(|data| (id, data)).map_err(|error| {
+                    io::Error::new(error.kind(), format!("{}: {error}", path.display()))
+                })
+            })
+            .collect();
+    }
+
+    let worker_count = jobs.min(inputs.len());
+    let chunk_size = inputs.len().div_ceil(worker_count);
+    let results = thread::scope(|scope| -> io::Result<Vec<(u16, Vec<u8>)>> {
+        let mut handles = Vec::new();
+        for chunk in inputs.chunks(chunk_size) {
+            handles.push(scope.spawn(move || {
+                chunk
+                    .iter()
+                    .map(|(id, path)| {
+                        fs::read(path).map(|data| (*id, data)).map_err(|error| {
+                            io::Error::new(error.kind(), format!("{}: {error}", path.display()))
+                        })
+                    })
+                    .collect::<io::Result<Vec<_>>>()
+            }));
+        }
+        let mut output = Vec::with_capacity(inputs.len());
+        for handle in handles {
+            output.extend(
+                handle
+                    .join()
+                    .map_err(|_| io::Error::other("parallel input worker panicked"))??,
+            );
+        }
+        Ok(output)
+    })?;
+    // Worker completion order is not part of the file format. Restore the
+    // FNT order before applying stable or randomized physical placement.
+    let mut results = results;
+    results.sort_by_key(|(id, _)| *id);
+    Ok(results)
 }
 
 pub(crate) fn empty_image(first_file_id: u16) -> FsImage {

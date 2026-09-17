@@ -45,6 +45,7 @@ fn main() -> io::Result<()> {
         let mut title = None;
         let mut header_template = None;
         let mut layout = filesystem::LayoutMode::Stable;
+        let mut jobs = 1usize;
         let mut i = 2;
         while i < a.len() {
             let mut step = 2;
@@ -63,6 +64,28 @@ fn main() -> io::Result<()> {
                     // ROM bytes and makes byte-for-byte rebuilds impossible.
                     layout = filesystem::LayoutMode::Random;
                     step = 1;
+                }
+                "--parallel" => {
+                    jobs = std::thread::available_parallelism()
+                        .map(|n| n.get())
+                        .unwrap_or(1);
+                    step = 1;
+                }
+                "--jobs" => {
+                    jobs = a
+                        .get(i + 1)
+                        .ok_or_else(|| {
+                            io::Error::new(io::ErrorKind::InvalidInput, "--jobs requires a number")
+                        })?
+                        .parse()
+                        .map_err(|_| {
+                            io::Error::new(io::ErrorKind::InvalidInput, "--jobs requires a number")
+                        })?;
+                    if jobs == 0 {
+                        jobs = std::thread::available_parallelism()
+                            .map(|n| n.get())
+                            .unwrap_or(1);
+                    }
                 }
                 "-g" => {
                     game_code = a.get(i + 1).map(String::as_str);
@@ -104,6 +127,7 @@ fn main() -> io::Result<()> {
             title,
             header_template.as_deref(),
             layout,
+            jobs,
         )?;
         println!("Created {}", rom.display());
         return Ok(());
