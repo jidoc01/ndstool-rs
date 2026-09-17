@@ -59,7 +59,7 @@ fn main() -> io::Result<()> {
                 "-y7" => arm7_overlay_table = a.get(i + 1).map(PathBuf::from),
                 "-y" => overlay_root = a.get(i + 1).map(PathBuf::from),
                 "-h" => header_template = a.get(i + 1).map(PathBuf::from),
-                "--random-layout" => {
+                "--enable-random-layout" => {
                     // Random payload placement is opt-in because it changes
                     // ROM bytes and makes byte-for-byte rebuilds impossible.
                     layout = filesystem::LayoutMode::Random;
