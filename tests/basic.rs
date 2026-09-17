@@ -40,6 +40,8 @@ fn create_and_inspect_basic_rom() {
         "{}",
         String::from_utf8_lossy(&created.stderr)
     );
+    let created_bytes = fs::read(&rom).unwrap();
+    assert_eq!(&created_bytes[0xc0..0xc4], &[0x24, 0xff, 0xae, 0x51]);
 
     let inspected = Command::new(bin)
         .args(["-i", rom.to_str().unwrap()])

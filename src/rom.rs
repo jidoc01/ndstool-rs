@@ -1,4 +1,4 @@
-use crate::{banner, elf, filesystem, header};
+use crate::{banner, elf, filesystem, header, logo};
 use std::{
     fs,
     fs::File,
@@ -182,7 +182,7 @@ pub(crate) fn create_with_tree(
     rom[0..8].copy_from_slice(b"NDSTOOL ");
     rom[12..16].copy_from_slice(b"####");
     rom[16..18].copy_from_slice(b"01");
-    if let Some(path) = logo_path {
+    let logo_bytes = if let Some(path) = logo_path {
         let logo = fs::read(path)?;
         if logo.len() != 156 {
             return Err(io::Error::new(
@@ -190,8 +190,11 @@ pub(crate) fn create_with_tree(
                 "raw logo must be exactly 156 bytes",
             ));
         }
-        rom[0xc0..0xc0 + 156].copy_from_slice(&logo);
-    }
+        logo
+    } else {
+        logo::NINTENDO_LOGO.to_vec()
+    };
+    rom[0xc0..0xc0 + 156].copy_from_slice(&logo_bytes);
     put32(&mut rom, 0x20, arm9_offset as u32);
     put32(&mut rom, 0x24, arm9.entry);
     put32(&mut rom, 0x28, arm9.ram);

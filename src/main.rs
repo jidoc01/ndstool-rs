@@ -5,6 +5,7 @@ mod crypto;
 mod elf;
 mod filesystem;
 mod header;
+mod logo;
 mod model;
 mod rom;
 
