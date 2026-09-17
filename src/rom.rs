@@ -173,15 +173,27 @@ pub(crate) fn create_with_tree(
     arm9_overlay_table: Option<&Path>,
     arm7_overlay_table: Option<&Path>,
     overlay_root: Option<&Path>,
+    game_code: Option<&str>,
+    maker_code: Option<&str>,
+    title: Option<&str>,
 ) -> io::Result<()> {
     let arm9 = elf::load(arm9_path, 0x02000000, 0x02000000)?;
     let arm7 = elf::load(arm7_path, 0x037f8000, 0x037f8000)?;
     let arm9_offset = 0x200usize;
     let mut rom = vec![0xffu8; arm9_offset + arm9.data.len()];
     rom[..0x200].fill(0);
-    rom[0..8].copy_from_slice(b"NDSTOOL ");
-    rom[12..16].copy_from_slice(b"####");
-    rom[16..18].copy_from_slice(b"01");
+    let title = title.unwrap_or("NDSTOOL");
+    let game_code = game_code.unwrap_or("####");
+    let maker_code = maker_code.unwrap_or("01");
+    if title.len() > 12 || game_code.len() != 4 || maker_code.len() != 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "title must be at most 12 bytes, game code 4 bytes, maker code 2 bytes",
+        ));
+    }
+    rom[0..title.len()].copy_from_slice(title.as_bytes());
+    rom[12..16].copy_from_slice(game_code.as_bytes());
+    rom[16..18].copy_from_slice(maker_code.as_bytes());
     let logo_bytes = if let Some(path) = logo_path {
         let logo = fs::read(path)?;
         if logo.len() != 156 {

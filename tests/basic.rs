@@ -32,6 +32,10 @@ fn create_and_inspect_basic_rom() {
             arm9.to_str().unwrap(),
             "-7",
             arm7.to_str().unwrap(),
+            "-g",
+            "TEST",
+            "AB",
+            "Sample",
         ])
         .output()
         .unwrap();
@@ -50,6 +54,7 @@ fn create_and_inspect_basic_rom() {
     let stdout = String::from_utf8_lossy(&inspected.stdout);
     assert!(inspected.status.success());
     assert!(stdout.contains("ARM9") && stdout.contains("ARM7"));
+    assert!(stdout.contains("Sample") && stdout.contains("TEST"));
     let _ = fs::remove_dir_all(dir);
 }
 

@@ -40,6 +40,9 @@ fn main() -> io::Result<()> {
         let mut arm9_overlay_table = None;
         let mut arm7_overlay_table = None;
         let mut overlay_root = None;
+        let mut game_code = None;
+        let mut maker_code = None;
+        let mut title = None;
         let mut i = 2;
         while i < a.len() {
             match a[i].as_str() {
@@ -51,6 +54,16 @@ fn main() -> io::Result<()> {
                 "-y9" => arm9_overlay_table = a.get(i + 1).map(PathBuf::from),
                 "-y7" => arm7_overlay_table = a.get(i + 1).map(PathBuf::from),
                 "-y" => overlay_root = a.get(i + 1).map(PathBuf::from),
+                "-g" => {
+                    game_code = a.get(i + 1).map(String::as_str);
+                    if i + 2 < a.len() && !a[i + 2].starts_with('-') {
+                        maker_code = Some(a[i + 2].as_str());
+                    }
+                    if i + 3 < a.len() && !a[i + 3].starts_with('-') {
+                        title = Some(a[i + 3].as_str());
+                    }
+                    i += maker_code.is_some() as usize + title.is_some() as usize;
+                }
                 other => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
@@ -77,6 +90,9 @@ fn main() -> io::Result<()> {
                 arm9_overlay_table.as_deref(),
                 arm7_overlay_table.as_deref(),
                 overlay_root.as_deref(),
+                game_code,
+                maker_code,
+                title,
             )?;
         } else {
             rom::create_with_tree(
@@ -89,6 +105,9 @@ fn main() -> io::Result<()> {
                 arm9_overlay_table.as_deref(),
                 arm7_overlay_table.as_deref(),
                 overlay_root.as_deref(),
+                game_code,
+                maker_code,
+                title,
             )?;
         }
         println!("Created {}", rom.display());
