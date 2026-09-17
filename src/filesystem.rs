@@ -131,14 +131,26 @@ pub(crate) fn build_image(
         }
         let start = names.len() as u32;
         let first = *file_id;
-        for (name, data) in &node.files {
+        let mut files: Vec<_> = node.files.iter().collect();
+        files.sort_by(|(a, _), (b, _)| {
+            a.to_ascii_lowercase()
+                .cmp(&b.to_ascii_lowercase())
+                .then_with(|| a.cmp(b))
+        });
+        for (name, data) in files {
             names.push(name.len() as u8);
             names.extend_from_slice(name.as_bytes());
             ordered.push(data.clone());
             *file_id += 1;
         }
         let mut child_ids = Vec::new();
-        for name in node.dirs.keys() {
+        let mut dirs: Vec<_> = node.dirs.iter().collect();
+        dirs.sort_by(|(a, _), (b, _)| {
+            a.to_ascii_lowercase()
+                .cmp(&b.to_ascii_lowercase())
+                .then_with(|| a.cmp(b))
+        });
+        for (name, _) in &dirs {
             let child = 0xf000 | *next_dir;
             *next_dir += 1;
             child_ids.push(child);
@@ -148,7 +160,7 @@ pub(crate) fn build_image(
         }
         names.push(0);
         infos[idx] = (start, first, parent);
-        for (child_id, child_node) in child_ids.into_iter().zip(node.dirs.values()) {
+        for (child_id, (_, child_node)) in child_ids.into_iter().zip(dirs) {
             encode(
                 child_node, child_id, id, file_id, next_dir, names, infos, ordered,
             );
@@ -174,6 +186,9 @@ pub(crate) fn build_image(
         fnt[i * 8 + 6..i * 8 + 8].copy_from_slice(&parent.to_le_bytes());
     }
     fnt[table_size..].copy_from_slice(&names);
+    // The root entry stores the total directory count in its parent field;
+    // child entries store their actual parent directory ID there.
+    fnt[6..8].copy_from_slice(&(infos.len() as u16).to_le_bytes());
     let mut data = Vec::new();
     let mut fat = Vec::new();
     let mut cursor = base_offset;
