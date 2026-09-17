@@ -207,6 +207,12 @@ fn create_and_extract_nested_data_file() {
         .status()
         .unwrap()
         .success());
+    let listed = Command::new(bin)
+        .args(["-l", rom.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(listed.status.success());
+    assert!(String::from_utf8_lossy(&listed.stdout).contains("/sub/hello.txt"));
     assert_eq!(
         fs::read(extracted.join("sub").join("hello.txt")).unwrap(),
         b"nested hello"
