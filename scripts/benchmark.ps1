@@ -35,6 +35,14 @@ function Compare-Tree([string]$Left, [string]$Right) {
     [pscustomobject]@{ Missing = $missing; Extra = $extra; Different = $different }
 }
 
+function Quote-ProcessArgument([string]$Argument) {
+    if ($Argument -match '[\s"]') {
+        '"' + $Argument.Replace('"', '\"') + '"'
+    } else {
+        $Argument
+    }
+}
+
 function Invoke-Extraction([string]$Name, [string]$Exe, [bool]$Parallel) {
     $out = Join-Path $OutputRoot $Name
     New-Item -ItemType Directory -Force -Path $out | Out-Null
@@ -47,7 +55,8 @@ function Invoke-Extraction([string]$Name, [string]$Exe, [bool]$Parallel) {
         $sw = [Diagnostics.Stopwatch]::StartNew()
         $stdout = Join-Path $out "run-$runNumber.out.txt"
         $stderr = Join-Path $out "run-$runNumber.err.txt"
-        $process = Start-Process -FilePath $Exe -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru `
+        $quotedArguments = @($arguments | ForEach-Object { Quote-ProcessArgument $_ })
+        $process = Start-Process -FilePath $Exe -ArgumentList $quotedArguments -WindowStyle Hidden -Wait -PassThru `
             -RedirectStandardOutput $stdout -RedirectStandardError $stderr
         $exitCode = $process.ExitCode
         $sw.Stop()

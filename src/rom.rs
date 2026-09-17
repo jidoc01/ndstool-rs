@@ -441,16 +441,18 @@ pub(crate) fn create_with_tree(
     put32(&mut rom, 0x5c, arm7_overlay_size);
     if let Some(path) = banner_path {
         let banner = banner::load(path)?;
-        if banner.is_empty() || banner.len() > 0x23c0 {
+        if banner.len() > 0x23c0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "banner size is invalid",
             ));
         }
-        let offset = (rom.len() + 0x1ff) & !0x1ff;
-        rom.resize(offset, 0xff);
-        rom.extend_from_slice(&banner);
-        put32(&mut rom, 0x68, offset as u32);
+        if !banner.is_empty() {
+            let offset = (rom.len() + 0x1ff) & !0x1ff;
+            rom.resize(offset, 0xff);
+            rom.extend_from_slice(&banner);
+            put32(&mut rom, 0x68, offset as u32);
+        }
     }
     let base = align(rom.len(), 0x200) as u32;
     let image = match data_root {

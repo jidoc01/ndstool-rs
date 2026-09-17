@@ -226,7 +226,18 @@ fn main() -> io::Result<()> {
         rom::extract_range(&rom, &path, h.arm7_offset, h.arm7_size)?;
     }
     if let Some(path) = banner {
-        rom::extract_range(&rom, &path, h.banner_offset, 0x840)?;
+        // A zero banner offset means the ROM has no banner. ndstool still
+        // creates the requested output file, but leaves it empty.
+        let size = if h.banner_offset == 0 {
+            0
+        } else if h.unit_code & 2 != 0 {
+            // DSi-enhanced ROMs carry the banner size in the extended header;
+            // a zero value is how ndstool represents a missing banner.
+            h.banner_size
+        } else {
+            0x840
+        };
+        rom::extract_range(&rom, &path, h.banner_offset, size)?;
     }
     if let Some(path) = logo {
         rom::extract_range(&rom, &path, 0xC0, 156)?;
