@@ -44,8 +44,10 @@ fn main() -> io::Result<()> {
         let mut maker_code = None;
         let mut title = None;
         let mut header_template = None;
+        let mut layout = filesystem::LayoutMode::Stable;
         let mut i = 2;
         while i < a.len() {
+            let mut step = 2;
             match a[i].as_str() {
                 "-9" => arm9 = a.get(i + 1).map(PathBuf::from),
                 "-7" => arm7 = a.get(i + 1).map(PathBuf::from),
@@ -56,6 +58,12 @@ fn main() -> io::Result<()> {
                 "-y7" => arm7_overlay_table = a.get(i + 1).map(PathBuf::from),
                 "-y" => overlay_root = a.get(i + 1).map(PathBuf::from),
                 "-h" => header_template = a.get(i + 1).map(PathBuf::from),
+                "--random-layout" => {
+                    // Random payload placement is opt-in because it changes
+                    // ROM bytes and makes byte-for-byte rebuilds impossible.
+                    layout = filesystem::LayoutMode::Random;
+                    step = 1;
+                }
                 "-g" => {
                     game_code = a.get(i + 1).map(String::as_str);
                     if i + 2 < a.len() && !a[i + 2].starts_with('-') {
@@ -73,7 +81,7 @@ fn main() -> io::Result<()> {
                     ))
                 }
             }
-            i += 2;
+            i += step;
         }
         let arm9 = arm9.ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "-c requires -9 ARM9.bin")
@@ -95,6 +103,7 @@ fn main() -> io::Result<()> {
             maker_code,
             title,
             header_template.as_deref(),
+            layout,
         )?;
         println!("Created {}", rom.display());
         return Ok(());

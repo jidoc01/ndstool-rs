@@ -4,6 +4,7 @@ use std::{
     fs::File,
     io::{self, Read, Seek, SeekFrom},
     path::Path,
+    time::{SystemTime, UNIX_EPOCH},
 };
 fn le16(b: &[u8], p: usize) -> u16 {
     u16::from_le_bytes([b[p], b[p + 1]])
@@ -76,6 +77,13 @@ pub(crate) struct FsImage {
     pub(crate) fat: Vec<u8>,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) enum LayoutMode {
+    #[default]
+    Stable,
+    Random,
+}
+
 fn insert(node: &mut Node, parts: &[&str], data: Vec<u8>) {
     if parts.len() == 1 {
         node.files.insert(parts[0].to_string(), data);
@@ -92,6 +100,7 @@ pub(crate) fn build_image(
     root: &Path,
     base_offset: u32,
     first_file_id: u16,
+    layout: LayoutMode,
 ) -> io::Result<FsImage> {
     fn scan(root: &Path, dir: &mut Node, prefix: &str) -> io::Result<()> {
         for item in std::fs::read_dir(root)? {
@@ -123,7 +132,7 @@ pub(crate) fn build_image(
         next_dir: &mut u16,
         names: &mut Vec<u8>,
         infos: &mut Vec<(u32, u16, u16)>,
-        ordered: &mut Vec<Vec<u8>>,
+        ordered: &mut Vec<(u16, Vec<u8>)>,
     ) {
         let idx = (id & 0x0fff) as usize;
         if infos.len() <= idx {
@@ -140,7 +149,9 @@ pub(crate) fn build_image(
         for (name, data) in files {
             names.push(name.len() as u8);
             names.extend_from_slice(name.as_bytes());
-            ordered.push(data.clone());
+            // FNT traversal owns the file ID. It must remain stable even when
+            // the physical payload order is randomized below.
+            ordered.push((*file_id, data.clone()));
             *file_id += 1;
         }
         let mut child_ids = Vec::new();
@@ -189,18 +200,41 @@ pub(crate) fn build_image(
     // The root entry stores the total directory count in its parent field;
     // child entries store their actual parent directory ID there.
     fnt[6..8].copy_from_slice(&(infos.len() as u16).to_le_bytes());
+    let mut placement = (0..ordered.len()).collect::<Vec<_>>();
+    if matches!(layout, LayoutMode::Random) {
+        // Only payload order is randomized; FNT names and file IDs are kept
+        // stable so the generated filesystem remains semantically identical.
+        // This option is intentionally non-reproducible. Leave it disabled
+        // when byte-for-byte rebuilds or deterministic builds are required.
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos() as u64)
+            .unwrap_or(0x9e37_79b9_7f4a_7c15);
+        let mut state = seed | 1;
+        for i in (1..placement.len()).rev() {
+            // xorshift64* is sufficient for layout randomization and avoids
+            // adding a dependency for a non-cryptographic feature.
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            let random = state.wrapping_mul(0x2545_f491_4f6c_dd1d);
+            placement.swap(i, (random as usize) % (i + 1));
+        }
+    }
     let mut data = Vec::new();
-    let mut fat = Vec::new();
+    let mut fat = vec![0u8; ordered.len() * 8];
     let mut cursor = base_offset;
-    for bytes in ordered {
+    for index in placement {
+        let (file_id, bytes) = &ordered[index];
         let aligned = (cursor + 0x1ff) & !0x1ff;
         data.resize(data.len() + (aligned - cursor) as usize, 0xff);
         cursor = aligned;
         let start = cursor;
         data.extend_from_slice(&bytes);
         cursor += bytes.len() as u32;
-        fat.extend_from_slice(&start.to_le_bytes());
-        fat.extend_from_slice(&cursor.to_le_bytes());
+        let local_id = usize::from(*file_id - first_file_id);
+        fat[local_id * 8..local_id * 8 + 4].copy_from_slice(&start.to_le_bytes());
+        fat[local_id * 8 + 4..local_id * 8 + 8].copy_from_slice(&cursor.to_le_bytes());
     }
     Ok(FsImage { data, fnt, fat })
 }

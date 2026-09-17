@@ -254,6 +254,7 @@ pub(crate) fn create_with_tree(
     maker_code: Option<&str>,
     title: Option<&str>,
     header_template: Option<&Path>,
+    layout: filesystem::LayoutMode,
 ) -> io::Result<()> {
     let arm9 = elf::load(arm9_path, 0x02000000, 0x02000000)?;
     let arm7 = elf::load(arm7_path, 0x0238_0000, 0x0238_0000)?;
@@ -433,7 +434,7 @@ pub(crate) fn create_with_tree(
     }
     let base = align(rom.len(), 0x200) as u32;
     let image = match data_root {
-        Some(root) => filesystem::build_image(root, base, next_file_id)?,
+        Some(root) => filesystem::build_image(root, base, next_file_id, layout)?,
         None => filesystem::empty_image(next_file_id),
     };
     rom.resize(base as usize, 0xff);
