@@ -377,7 +377,7 @@ fn put_word(data: &mut [u8], p: usize, value: u32) {
 
 pub(crate) fn transform_secure_area(path: &std::path::Path, option: char) -> io::Result<()> {
     let mut rom = std::fs::read(path)?;
-    if rom.len() < 0x4800 {
+    if rom.len() < 0x8000 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "ROM is too small for a secure area",
@@ -386,8 +386,12 @@ pub(crate) fn transform_secure_area(path: &std::path::Path, option: char) -> io:
     let gamecode = u32::from_le_bytes([rom[12], rom[13], rom[14], rom[15]]);
     let mut area = rom[0x4000..0x8000].to_vec();
     validate_block(&area)?;
+    let decrypted = word(&area, 0) == 0xe7ffdeff && word(&area, 4) == 0xe7ffdeff;
     let (mut magic, mut args) = init1(gamecode);
     if option == 'd' {
+        if decrypted {
+            return Ok(());
+        }
         let mut left = word(&area, 4);
         let mut right = word(&area, 0);
         decrypt(&magic, &mut left, &mut right);
@@ -416,12 +420,10 @@ pub(crate) fn transform_secure_area(path: &std::path::Path, option: char) -> io:
             put_word(&mut area, p, right);
             put_word(&mut area, p + 4, left);
         }
+        rom[0x200..0x4000].fill(0);
     } else if option == 'e' || option == 'E' {
-        if word(&area, 0) != 0xe7ffdeff || word(&area, 4) != 0xe7ffdeff {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "secure area is not in decrypted form",
-            ));
+        if !decrypted {
+            return Ok(());
         }
         args[1] <<= 1;
         args[2] >>= 1;
@@ -446,13 +448,43 @@ pub(crate) fn transform_secure_area(path: &std::path::Path, option: char) -> io:
         encrypt(&magic2, &mut left, &mut right);
         put_word(&mut area, 0, right);
         put_word(&mut area, 4, left);
+
+        rom[0x200..0x1000].fill(0);
+        let rounds_offset = if option == 'E' { 0x2000 } else { 0x1600 };
+        let sbox_offset = if option == 'E' { 0x2400 } else { 0x1c00 };
+        for (i, value) in magic[..18].iter().enumerate() {
+            put_word(&mut rom, rounds_offset + i * 4, *value);
+        }
+        for (i, value) in magic[18..].iter().enumerate() {
+            put_word(&mut rom, sbox_offset + i * 4, *value);
+        }
+        rom[0x3000..0x3008].copy_from_slice(&[0xff, 0, 0xff, 0, 0xaa, 0x55, 0xaa, 0x55]);
+        for i in 0x3008..0x3200 {
+            rom[i] = i as u8;
+        }
+        for i in 0x3200..0x3400 {
+            rom[i] = 0xffu8.wrapping_sub(i as u8);
+        }
+        rom[0x3400..0x3600].fill(0);
+        rom[0x3600..0x3800].fill(0xff);
+        rom[0x3800..0x3a00].fill(0x0f);
+        rom[0x3a00..0x3c00].fill(0xf0);
+        rom[0x3c00..0x3e00].fill(0x55);
+        rom[0x3e00..0x4000].fill(0xaa);
+        rom[0x3fff] = 0;
     } else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "secure area option must be d, e, or E",
         ));
     }
-    rom[0x4000..0x8000].copy_from_slice(&area);
+    rom[0x4000..0x4800].copy_from_slice(&area[..0x800]);
+    if option == 'e' || option == 'E' {
+        let crc = crate::header::crc16(&area);
+        rom[0x6c..0x6e].copy_from_slice(&crc.to_le_bytes());
+        let crc = crate::header::crc16(&rom[..0x15e]);
+        rom[0x15e..0x160].copy_from_slice(&crc.to_le_bytes());
+    }
     std::fs::write(path, rom)
 }
 
