@@ -43,9 +43,13 @@ function Invoke-Extraction([string]$Name, [string]$Exe, [bool]$Parallel) {
     if ($Parallel) { $arguments += '--parallel' }
     $times = @()
     1..3 | ForEach-Object {
+        $runNumber = $_
         $sw = [Diagnostics.Stopwatch]::StartNew()
-        & $Exe @arguments *> $null
-        $exitCode = $LASTEXITCODE
+        $stdout = Join-Path $out "run-$runNumber.out.txt"
+        $stderr = Join-Path $out "run-$runNumber.err.txt"
+        $process = Start-Process -FilePath $Exe -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+        $exitCode = $process.ExitCode
         $sw.Stop()
         if ($exitCode -ne 0) { throw "$Name failed with exit code $exitCode" }
         $times += [math]::Round($sw.Elapsed.TotalMilliseconds, 1)
