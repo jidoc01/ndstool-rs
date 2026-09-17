@@ -79,3 +79,13 @@ pub(crate) fn fix_crc(path: &Path) -> io::Result<()> {
     data[0x15e..0x160].copy_from_slice(&crc.to_le_bytes());
     fs::write(path, data)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::crc16;
+
+    #[test]
+    fn crc16_matches_ndstool_algorithm() {
+        assert_eq!(crc16(b"123456789"), 0x4B37);
+    }
+}
