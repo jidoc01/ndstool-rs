@@ -22,6 +22,18 @@ pub(crate) struct Header {
     pub(crate) title: String,
     pub(crate) game_code: String,
     pub(crate) maker_code: String,
+    pub(crate) dsi_flags: u8,
+    pub(crate) dsi9_offset: u32,
+    pub(crate) dsi9_ram: u32,
+    pub(crate) dsi9_size: u32,
+    pub(crate) dsi7_offset: u32,
+    pub(crate) dsi7_ram: u32,
+    pub(crate) dsi7_size: u32,
+    pub(crate) banner_size: u32,
+    pub(crate) total_rom_size: u32,
+    pub(crate) region_flags: u32,
+    pub(crate) access_control: u32,
+    pub(crate) scfg_ext_mask: u32,
 }
 
 #[derive(Clone)]
