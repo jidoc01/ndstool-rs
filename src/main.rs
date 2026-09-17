@@ -43,6 +43,7 @@ fn main() -> io::Result<()> {
         let mut game_code = None;
         let mut maker_code = None;
         let mut title = None;
+        let mut header_template = None;
         let mut i = 2;
         while i < a.len() {
             match a[i].as_str() {
@@ -54,6 +55,7 @@ fn main() -> io::Result<()> {
                 "-y9" => arm9_overlay_table = a.get(i + 1).map(PathBuf::from),
                 "-y7" => arm7_overlay_table = a.get(i + 1).map(PathBuf::from),
                 "-y" => overlay_root = a.get(i + 1).map(PathBuf::from),
+                "-h" => header_template = a.get(i + 1).map(PathBuf::from),
                 "-g" => {
                     game_code = a.get(i + 1).map(String::as_str);
                     if i + 2 < a.len() && !a[i + 2].starts_with('-') {
@@ -79,37 +81,21 @@ fn main() -> io::Result<()> {
         let arm7 = arm7.ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "-c requires -7 ARM7.bin")
         })?;
-        if let Some(root) = data.as_deref() {
-            rom::create_with_tree(
-                &rom,
-                &arm9,
-                &arm7,
-                Some(root),
-                banner.as_deref(),
-                logo.as_deref(),
-                arm9_overlay_table.as_deref(),
-                arm7_overlay_table.as_deref(),
-                overlay_root.as_deref(),
-                game_code,
-                maker_code,
-                title,
-            )?;
-        } else {
-            rom::create_with_tree(
-                &rom,
-                &arm9,
-                &arm7,
-                None,
-                banner.as_deref(),
-                logo.as_deref(),
-                arm9_overlay_table.as_deref(),
-                arm7_overlay_table.as_deref(),
-                overlay_root.as_deref(),
-                game_code,
-                maker_code,
-                title,
-            )?;
-        }
+        rom::create_with_tree(
+            &rom,
+            &arm9,
+            &arm7,
+            data.as_deref(),
+            banner.as_deref(),
+            logo.as_deref(),
+            arm9_overlay_table.as_deref(),
+            arm7_overlay_table.as_deref(),
+            overlay_root.as_deref(),
+            game_code,
+            maker_code,
+            title,
+            header_template.as_deref(),
+        )?;
         println!("Created {}", rom.display());
         return Ok(());
     }

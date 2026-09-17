@@ -189,16 +189,52 @@ pub(crate) fn create_with_tree(
     game_code: Option<&str>,
     maker_code: Option<&str>,
     title: Option<&str>,
+    header_template: Option<&Path>,
 ) -> io::Result<()> {
     let arm9 = elf::load(arm9_path, 0x02000000, 0x02000000)?;
     let arm7 = elf::load(arm7_path, 0x0238_0000, 0x0238_0000)?;
     let secure_boot = arm9.entry == arm9.ram.saturating_add(0x800);
     let arm9_offset = if secure_boot { 0x4000usize } else { 0x200usize };
     let mut rom = vec![0xffu8; arm9_offset + arm9.data.len()];
-    rom[..arm9_offset].fill(0);
-    let title = title.unwrap_or("NDSTOOL");
-    let game_code = game_code.unwrap_or("####");
-    let maker_code = maker_code.unwrap_or("01");
+    let template = header_template.map(fs::read).transpose()?;
+    if let Some(template) = template.as_deref() {
+        if template.len() < 0x200 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "header template must be at least 512 bytes",
+            ));
+        }
+        let copy_len = arm9_offset.min(template.len());
+        rom[..copy_len].copy_from_slice(&template[..copy_len]);
+        if copy_len < arm9_offset {
+            rom[copy_len..arm9_offset].fill(0);
+        }
+    } else {
+        rom[..arm9_offset].fill(0);
+    }
+    let template_title = template.as_deref().map(|bytes| {
+        String::from_utf8_lossy(&bytes[..12])
+            .trim_end_matches('\0')
+            .to_string()
+    });
+    let template_game_code = template
+        .as_deref()
+        .map(|bytes| String::from_utf8_lossy(&bytes[12..16]).to_string());
+    let template_maker_code = template
+        .as_deref()
+        .map(|bytes| String::from_utf8_lossy(&bytes[16..18]).to_string());
+    let title = title
+        .map(str::to_owned)
+        .or(template_title)
+        .unwrap_or_else(|| "NDSTOOL".to_string());
+    let game_code = game_code
+        .map(str::to_owned)
+        .or(template_game_code)
+        .unwrap_or_else(|| "####".to_string());
+    let maker_code = maker_code
+        .map(str::to_owned)
+        .or(template_maker_code)
+        .unwrap_or_else(|| "01".to_string());
     if title.len() > 12 || game_code.len() != 4 || maker_code.len() != 2 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -217,6 +253,8 @@ pub(crate) fn create_with_tree(
             ));
         }
         logo
+    } else if let Some(template) = template.as_deref() {
+        template[0xc0..0xc0 + 156].to_vec()
     } else {
         logo::NINTENDO_LOGO.to_vec()
     };
