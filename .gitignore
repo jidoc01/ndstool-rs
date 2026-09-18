@@ -1,3 +1,4 @@
 /target/
 /upstream-ndstool/
 /compat-bench/
+.ndstool-rs/

@@ -6,7 +6,10 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -14,4 +17,4 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
       - run: cargo check --all-targets
-      - run: cargo test
+      - run: cargo test --all-targets

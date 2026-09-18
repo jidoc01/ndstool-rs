@@ -1,8 +1,10 @@
 use crate::model::{Entry, Header};
+#[cfg(test)]
+mod tests;
 use std::{
     collections::BTreeMap,
     fs::{self, File},
-    io::{self, Read, Seek, SeekFrom},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::Path,
     thread,
     time::{SystemTime, UNIX_EPOCH},
@@ -68,14 +70,21 @@ pub(crate) fn read_entries(path: &Path, h: &Header) -> io::Result<Vec<Entry>> {
 
 #[derive(Default)]
 struct Node {
-    files: BTreeMap<String, std::path::PathBuf>,
+    files: BTreeMap<String, (std::path::PathBuf, u64)>,
     dirs: BTreeMap<String, Node>,
 }
 
-pub(crate) struct FsImage {
-    pub(crate) data: Vec<u8>,
+pub(crate) struct FsPlan {
+    pub(crate) end: u32,
+    payloads: Vec<Payload>,
     pub(crate) fnt: Vec<u8>,
     pub(crate) fat: Vec<u8>,
+}
+
+struct Payload {
+    path: std::path::PathBuf,
+    start: u32,
+    end: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -85,7 +94,7 @@ pub(crate) enum LayoutMode {
     Random,
 }
 
-fn insert(node: &mut Node, parts: &[&str], path: std::path::PathBuf) {
+fn insert(node: &mut Node, parts: &[&str], path: (std::path::PathBuf, u64)) {
     if parts.len() == 1 {
         node.files.insert(parts[0].to_string(), path);
         return;
@@ -97,13 +106,13 @@ fn insert(node: &mut Node, parts: &[&str], path: std::path::PathBuf) {
     );
 }
 
-pub(crate) fn build_image(
+pub(crate) fn plan_image(
     root: &Path,
     base_offset: u32,
     first_file_id: u16,
     layout: LayoutMode,
-    jobs: usize,
-) -> io::Result<FsImage> {
+) -> io::Result<FsPlan> {
+    let mut profile = crate::profile::Stages::new();
     fn scan(root: &Path, dir: &mut Node, prefix: &str) -> io::Result<()> {
         for item in std::fs::read_dir(root)? {
             let item = item?;
@@ -118,7 +127,7 @@ pub(crate) fn build_image(
                 // Keep paths during the directory scan. The actual reads are
                 // performed after FNT IDs are assigned, which lets us read
                 // independent files concurrently without changing their IDs.
-                insert(dir, &[&name], path);
+                insert(dir, &[&name], (path, item.metadata()?.len()));
             }
         }
         let _ = prefix;
@@ -137,7 +146,7 @@ pub(crate) fn build_image(
         next_dir: &mut u16,
         names: &mut Vec<u8>,
         infos: &mut Vec<(u32, u16, u16)>,
-        ordered: &mut Vec<(u16, std::path::PathBuf)>,
+        ordered: &mut Vec<(u16, (std::path::PathBuf, u64))>,
     ) {
         let idx = (id & 0x0fff) as usize;
         if infos.len() <= idx {
@@ -190,7 +199,7 @@ pub(crate) fn build_image(
         &mut infos,
         &mut ordered,
     );
-    let ordered = read_inputs(ordered, jobs)?;
+    profile.mark("fs.scan_encode");
     let table_size = infos.len() * 8;
     let mut fnt = vec![0u8; table_size + names.len()];
     for (i, (start, first, parent)) in infos.iter().enumerate() {
@@ -227,131 +236,125 @@ pub(crate) fn build_image(
     let mut fat = vec![0u8; ordered.len() * 8];
     let mut cursor = base_offset;
     for index in placement {
-        let (file_id, bytes) = &ordered[index];
-        let aligned = (cursor + 0x1ff) & !0x1ff;
+        let (file_id, (path, size)) = &ordered[index];
+        let aligned = cursor
+            .checked_add(0x1ff)
+            .ok_or_else(|| io::Error::other("ROM offset overflow"))?
+            & !0x1ff;
         cursor = aligned;
         let start = cursor;
-        cursor += bytes.len() as u32;
+        cursor = u32::try_from(u64::from(cursor) + size)
+            .map_err(|_| io::Error::other("ROM offset overflow"))?;
         let local_id = usize::from(*file_id - first_file_id);
         fat[local_id * 8..local_id * 8 + 4].copy_from_slice(&start.to_le_bytes());
         fat[local_id * 8 + 4..local_id * 8 + 8].copy_from_slice(&cursor.to_le_bytes());
-        placements.push(((start - base_offset) as usize, bytes.clone()));
+        placements.push(Payload {
+            path: path.clone(),
+            start,
+            end: cursor,
+        });
     }
-    let mut data = vec![0xffu8; (cursor - base_offset) as usize];
-    copy_payloads(&mut data, placements, jobs)?;
-    Ok(FsImage { data, fnt, fat })
-}
-
-fn copy_payloads(
-    data: &mut [u8],
-    placements: Vec<(usize, Vec<u8>)>,
-    jobs: usize,
-) -> io::Result<()> {
-    if jobs <= 1 || placements.len() <= 1 {
-        for (offset, bytes) in placements {
-            data[offset..offset + bytes.len()].copy_from_slice(&bytes);
-        }
-        return Ok(());
-    }
-
-    let worker_count = jobs.min(placements.len());
-    let chunk_size = placements.len().div_ceil(worker_count);
-    // Raw pointers are deliberately represented as an address while moving
-    // the worker closure between threads; the address remains valid because
-    // `data` is borrowed for the entire scoped-thread lifetime.
-    let data_start = data.as_mut_ptr() as usize;
-    let data_len = data.len();
-    thread::scope(|scope| {
-        let mut handles = Vec::new();
-        for chunk in placements.chunks(chunk_size) {
-            handles.push(scope.spawn(move || -> io::Result<()> {
-                for (offset, bytes) in chunk {
-                    if offset.saturating_add(bytes.len()) > data_len {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "payload placement exceeds filesystem image",
-                        ));
-                    }
-                    // Every range was assigned by the sequential layout pass;
-                    // alignment makes the ranges disjoint. Each worker writes
-                    // only its own range, so the raw pointer does not alias
-                    // another worker's mutable slice.
-                    unsafe {
-                        std::ptr::copy_nonoverlapping(
-                            bytes.as_ptr(),
-                            (data_start as *mut u8).add(*offset),
-                            bytes.len(),
-                        );
-                    }
-                }
-                Ok(())
-            }));
-        }
-        for handle in handles {
-            handle
-                .join()
-                .map_err(|_| io::Error::other("parallel payload worker panicked"))??;
-        }
-        Ok(())
+    profile.mark("fs.layout");
+    Ok(FsPlan {
+        end: cursor,
+        payloads: placements,
+        fnt,
+        fat,
     })
 }
 
-fn read_inputs(
-    inputs: Vec<(u16, std::path::PathBuf)>,
-    jobs: usize,
-) -> io::Result<Vec<(u16, Vec<u8>)>> {
-    if jobs <= 1 || inputs.len() <= 1 {
-        return inputs
-            .into_iter()
-            .map(|(id, path)| {
-                fs::read(&path).map(|data| (id, data)).map_err(|error| {
-                    io::Error::new(error.kind(), format!("{}: {error}", path.display()))
-                })
-            })
-            .collect();
+/// Write FF padding explicitly: sparse-file zeroes are not ROM padding.
+pub(crate) fn padding(writer: &mut impl Write, mut length: u64) -> io::Result<()> {
+    let bytes = [0xff; 64 * 1024];
+    while length != 0 {
+        let count = length.min(bytes.len() as u64) as usize;
+        writer.write_all(&bytes[..count])?;
+        length -= count as u64;
     }
-
-    let worker_count = jobs.min(inputs.len());
-    let chunk_size = inputs.len().div_ceil(worker_count);
-    let results = thread::scope(|scope| -> io::Result<Vec<(u16, Vec<u8>)>> {
-        let mut handles = Vec::new();
-        for chunk in inputs.chunks(chunk_size) {
-            handles.push(scope.spawn(move || {
-                chunk
-                    .iter()
-                    .map(|(id, path)| {
-                        fs::read(path).map(|data| (*id, data)).map_err(|error| {
-                            io::Error::new(error.kind(), format!("{}: {error}", path.display()))
-                        })
-                    })
-                    .collect::<io::Result<Vec<_>>>()
-            }));
-        }
-        let mut output = Vec::with_capacity(inputs.len());
-        for handle in handles {
-            output.extend(
-                handle
-                    .join()
-                    .map_err(|_| io::Error::other("parallel input worker panicked"))??,
-            );
-        }
-        Ok(output)
-    })?;
-    // Worker completion order is not part of the file format. Restore the
-    // FNT order before applying stable or randomized physical placement.
-    let mut results = results;
-    results.sort_by_key(|(id, _)| *id);
-    Ok(results)
+    Ok(())
 }
 
-pub(crate) fn empty_image(first_file_id: u16) -> FsImage {
+fn write_payloads(
+    writer: &mut impl Write,
+    payloads: &[Payload],
+    mut cursor: u32,
+) -> io::Result<()> {
+    let mut buffer = vec![0; 256 * 1024];
+    for payload in payloads {
+        padding(writer, u64::from(payload.start - cursor))?;
+        let mut input = File::open(&payload.path)?;
+        let mut remaining = u64::from(payload.end - payload.start);
+        while remaining != 0 {
+            let count = remaining.min(buffer.len() as u64) as usize;
+            input.read_exact(&mut buffer[..count]).map_err(|error| {
+                io::Error::new(error.kind(), format!("{}: {error}", payload.path.display()))
+            })?;
+            writer.write_all(&buffer[..count])?;
+            remaining -= count as u64;
+        }
+        if input.read(&mut buffer[..1])? != 0 {
+            return Err(io::Error::other(format!(
+                "input changed during creation: {}",
+                payload.path.display()
+            )));
+        }
+        cursor = payload.end;
+    }
+    Ok(())
+}
+
+impl FsPlan {
+    pub(crate) fn write_serial(&self, writer: &mut impl Write, base: u32) -> io::Result<()> {
+        write_payloads(writer, &self.payloads, base)
+    }
+
+    pub(crate) fn write_parallel(&self, path: &Path, base: u32, jobs: usize) -> io::Result<()> {
+        if self.payloads.is_empty() {
+            return Ok(());
+        }
+        let chunk_size = self
+            .payloads
+            .len()
+            .div_ceil(jobs.max(1).min(self.payloads.len()));
+        thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for (index, chunk) in self.payloads.chunks(chunk_size).enumerate() {
+                // A chunk owns the gap preceding its first payload too. These
+                // ranges partition [base, end), including zero-length files.
+                let start = if index == 0 {
+                    base
+                } else {
+                    self.payloads[index * chunk_size - 1].end
+                };
+                handles.push(scope.spawn(move || -> io::Result<()> {
+                    // Independent open handles have independent seek cursors,
+                    // on Windows as well as Unix. Never clone a shared cursor.
+                    let mut file = fs::OpenOptions::new().write(true).open(path)?;
+                    file.seek(SeekFrom::Start(u64::from(start)))?;
+                    let mut writer = io::BufWriter::with_capacity(1024 * 1024, file);
+                    write_payloads(&mut writer, chunk, start)?;
+                    writer.flush()
+                }));
+            }
+            for handle in handles {
+                handle
+                    .join()
+                    .map_err(|_| io::Error::other("parallel payload worker panicked"))??;
+            }
+            Ok(())
+        })
+    }
+}
+
+pub(crate) fn empty_plan(first_file_id: u16, base: u32) -> FsPlan {
     let mut fnt = vec![0u8; 8 + 1];
     fnt[0..4].copy_from_slice(&8u32.to_le_bytes());
     fnt[4..6].copy_from_slice(&first_file_id.to_le_bytes());
     fnt[6..8].copy_from_slice(&0u16.to_le_bytes());
     fnt[8] = 0;
-    FsImage {
-        data: Vec::new(),
+    FsPlan {
+        end: base,
+        payloads: Vec::new(),
         fnt,
         fat: Vec::new(),
     }

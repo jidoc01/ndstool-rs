@@ -5,8 +5,11 @@ mod crypto;
 mod elf;
 mod filesystem;
 mod header;
+mod incremental;
 mod logo;
 mod model;
+mod output;
+mod profile;
 mod rom;
 
 fn main() -> io::Result<()> {
@@ -47,6 +50,7 @@ fn main() -> io::Result<()> {
         let mut layout = filesystem::LayoutMode::Stable;
         let mut jobs = 1usize;
         let mut ignore_missing_overlays = false;
+        let mut incremental_mode = false;
         let mut i = 2;
         while i < a.len() {
             let mut step = 2;
@@ -70,6 +74,10 @@ fn main() -> io::Result<()> {
                     // This is deliberately opt-in: the original ndstool
                     // reports missing overlay files as an error.
                     ignore_missing_overlays = true;
+                    step = 1;
+                }
+                "--incremental" => {
+                    incremental_mode = true;
                     step = 1;
                 }
                 "--parallel" => {
@@ -112,6 +120,32 @@ fn main() -> io::Result<()> {
                 }
             }
             i += step;
+        }
+        if incremental_mode {
+            if arm9.is_some()
+                || arm7.is_some()
+                || banner.is_some()
+                || logo.is_some()
+                || arm9_overlay_table.is_some()
+                || arm7_overlay_table.is_some()
+                || overlay_root.is_some()
+                || header_template.is_some()
+                || game_code.is_some()
+                || matches!(layout, filesystem::LayoutMode::Random)
+                || ignore_missing_overlays
+            {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput,
+                    "incremental creation edits -d filesystem payloads only; omit binary/header/overlay/layout options"));
+            }
+            let data_root = data.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--incremental requires -d DATA_DIR",
+                )
+            })?;
+            incremental::link(&data_root, &rom)?;
+            println!("Incrementally linked {}", rom.display());
+            return Ok(());
         }
         let arm9 = arm9.ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "-c requires -9 ARM9.bin")
@@ -173,6 +207,7 @@ fn main() -> io::Result<()> {
     let mut arm7_overlay_table = None;
     let mut overlays = None;
     let mut jobs = 1usize;
+    let mut incremental_mode = false;
     let mut i = 2;
     while i < a.len() {
         let mut step = 2;
@@ -194,6 +229,10 @@ fn main() -> io::Result<()> {
                 jobs = std::thread::available_parallelism()
                     .map(|n| n.get())
                     .unwrap_or(1);
+                step = 1;
+            }
+            "--incremental" => {
+                incremental_mode = true;
                 step = 1;
             }
             "--jobs" => {
@@ -267,5 +306,8 @@ fn main() -> io::Result<()> {
         )?;
     }
     rom::extract_entries(&rom, &entries, &root, jobs)?;
+    if incremental_mode {
+        incremental::write_state(&root, &rom, &h, &entries)?;
+    }
     Ok(())
 }

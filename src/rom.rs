@@ -2,7 +2,7 @@ use crate::{banner, crypto, elf, filesystem, header, logo};
 use std::{
     fs,
     fs::File,
-    io::{self, Read, Seek, SeekFrom},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::Path,
     thread,
 };
@@ -274,6 +274,7 @@ pub(crate) fn create_with_tree(
     jobs: usize,
     ignore_missing_overlays: bool,
 ) -> io::Result<()> {
+    let mut profile = crate::profile::Stages::new();
     let arm9 = elf::load(arm9_path, 0x02000000, 0x02000000)?;
     let arm7 = elf::load(arm7_path, 0x0238_0000, 0x0238_0000)?;
     let secure_boot = arm9.entry == arm9.ram.saturating_add(0x800);
@@ -455,21 +456,23 @@ pub(crate) fn create_with_tree(
         }
     }
     let base = align(rom.len(), 0x200) as u32;
+    profile.mark("rom.components");
     let image = match data_root {
-        Some(root) => filesystem::build_image(root, base, next_file_id, layout, jobs)?,
-        None => filesystem::empty_image(next_file_id),
+        Some(root) => filesystem::plan_image(root, base, next_file_id, layout)?,
+        None => filesystem::empty_plan(next_file_id, base),
     };
+    profile.mark("rom.filesystem");
     rom.resize(base as usize, 0xff);
-    rom.extend_from_slice(&image.data);
-    let fnt_offset = rom.len() as u32;
-    rom.extend_from_slice(&image.fnt);
-    let fat_offset = ((rom.len() + 3) & !3) as u32;
-    rom.resize(fat_offset as usize, 0xff);
+    let fnt_offset = image.end;
+    let mut tail = image.fnt.clone();
+    let fat_offset = u32::try_from((u64::from(fnt_offset) + tail.len() as u64 + 3) & !3)
+        .map_err(|_| io::Error::other("ROM offset overflow"))?;
+    tail.resize((fat_offset - fnt_offset) as usize, 0xff);
     for (start, end) in overlay_fat {
-        rom.extend_from_slice(&start.to_le_bytes());
-        rom.extend_from_slice(&end.to_le_bytes());
+        tail.extend_from_slice(&start.to_le_bytes());
+        tail.extend_from_slice(&end.to_le_bytes());
     }
-    rom.extend_from_slice(&image.fat);
+    tail.extend_from_slice(&image.fat);
     put32(&mut rom, 0x40, fnt_offset);
     put32(&mut rom, 0x44, image.fnt.len() as u32);
     put32(&mut rom, 0x48, fat_offset);
@@ -478,12 +481,32 @@ pub(crate) fn create_with_tree(
         0x4c,
         (image.fat.len() + (next_file_id as usize) * 8) as u32,
     );
-    let size = rom.len().next_power_of_two().max(0x200);
-    let application_end = rom.len() as u32;
+    let application_end = u32::try_from(u64::from(fnt_offset) + tail.len() as u64)
+        .map_err(|_| io::Error::other("ROM offset overflow"))?;
+    let size = u64::from(application_end).next_power_of_two().max(0x200);
     put32(&mut rom, 0x80, application_end);
-    rom.resize(size, 0xff);
     rom[0x14] = (size.trailing_zeros() as u8).saturating_sub(17);
     let crc = header::crc16(&rom[..0x15e]);
     rom[0x15e..0x160].copy_from_slice(&crc.to_le_bytes());
-    fs::write(out, rom)
+    profile.mark("rom.assemble_pad");
+    let (staged, file) = crate::output::Output::new(out)?;
+    let mut writer = io::BufWriter::with_capacity(1024 * 1024, file);
+    writer.write_all(&rom)?;
+    if jobs <= 1 {
+        image.write_serial(&mut writer, base)?;
+    } else {
+        // Reserve payload ranges without filling them twice. Workers fill
+        // every byte of this region, including alignment gaps, before publish.
+        writer.seek(SeekFrom::Start(u64::from(fnt_offset)))?;
+    }
+    writer.write_all(&tail)?;
+    filesystem::padding(&mut writer, size - u64::from(application_end))?;
+    writer.flush()?;
+    drop(writer);
+    if jobs > 1 {
+        image.write_parallel(&staged.path, base, jobs)?;
+    }
+    staged.publish(out)?;
+    profile.mark("rom.write");
+    Ok(())
 }

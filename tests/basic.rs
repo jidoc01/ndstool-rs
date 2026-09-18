@@ -59,6 +59,75 @@ fn create_and_inspect_basic_rom() {
 }
 
 #[test]
+fn incremental_state_round_trip_patches_existing_payload() {
+    let dir = temp_dir();
+    let arm9 = dir.join("arm9.bin");
+    let arm7 = dir.join("arm7.bin");
+    let data = dir.join("data");
+    let extracted = dir.join("extracted");
+    let original = dir.join("original.nds");
+    let updated = dir.join("updated.nds");
+    fs::create_dir_all(&data).unwrap();
+    fs::write(&arm9, [1u8, 2, 3, 4]).unwrap();
+    fs::write(&arm7, [5u8, 6, 7, 8]).unwrap();
+    fs::write(data.join("message.bin"), [9u8, 8, 7, 6]).unwrap();
+
+    let bin = env!("CARGO_BIN_EXE_ndstool-rs");
+    assert!(Command::new(bin)
+        .args([
+            "-c",
+            original.to_str().unwrap(),
+            "-9",
+            arm9.to_str().unwrap(),
+            "-7",
+            arm7.to_str().unwrap(),
+            "-d",
+            data.to_str().unwrap()
+        ])
+        .status()
+        .unwrap()
+        .success());
+    assert!(Command::new(bin)
+        .args([
+            "-x",
+            original.to_str().unwrap(),
+            "-d",
+            extracted.to_str().unwrap(),
+            "--incremental"
+        ])
+        .status()
+        .unwrap()
+        .success());
+
+    fs::write(extracted.join("message.bin"), [1u8, 3, 3, 7]).unwrap();
+    assert!(Command::new(bin)
+        .args([
+            "-c",
+            updated.to_str().unwrap(),
+            "-d",
+            extracted.to_str().unwrap(),
+            "--incremental"
+        ])
+        .status()
+        .unwrap()
+        .success());
+
+    let check = dir.join("check");
+    assert!(Command::new(bin)
+        .args([
+            "-x",
+            updated.to_str().unwrap(),
+            "-d",
+            check.to_str().unwrap()
+        ])
+        .status()
+        .unwrap()
+        .success());
+    assert_eq!(fs::read(check.join("message.bin")).unwrap(), [1u8, 3, 3, 7]);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn places_arm7_after_large_arm9() {
     let dir = temp_dir();
     let arm9 = dir.join("large-arm9.bin");
