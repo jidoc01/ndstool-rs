@@ -1,6 +1,4 @@
 use crate::model::{Entry, Header};
-#[cfg(test)]
-mod tests;
 use std::{
     collections::BTreeMap,
     fs::{self, File},
@@ -9,12 +7,18 @@ use std::{
     thread,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(test)]
+mod tests;
+
 fn le16(b: &[u8], p: usize) -> u16 {
     u16::from_le_bytes([b[p], b[p + 1]])
 }
+
 fn le32(b: &[u8], p: usize) -> u32 {
     u32::from_le_bytes([b[p], b[p + 1], b[p + 2], b[p + 3]])
 }
+
 pub(crate) fn read_entries(path: &Path, h: &Header) -> io::Result<Vec<Entry>> {
     let mut f = File::open(path)?;
     f.seek(SeekFrom::Start(h.fnt_offset as u64))?;

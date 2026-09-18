@@ -18,12 +18,14 @@ impl Drop for Fixture {
         let _ = fs::remove_dir_all(&self.root);
     }
 }
+
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_ndstool-rs"))
         .args(args)
         .output()
         .unwrap()
 }
+
 fn ok(args: &[&str]) -> Output {
     let output = run(args);
     assert!(
@@ -33,12 +35,15 @@ fn ok(args: &[&str]) -> Output {
     );
     output
 }
+
 fn p(path: &Path) -> &str {
     path.to_str().unwrap()
 }
+
 fn u32_at(b: &[u8], p: usize) -> u32 {
     u32::from_le_bytes(b[p..p + 4].try_into().unwrap())
 }
+
 fn listing(rom: &Path) -> BTreeMap<String, (u32, u32, u32)> {
     let output = ok(&["-l", p(rom)]);
     String::from_utf8(output.stdout)
@@ -57,6 +62,7 @@ fn listing(rom: &Path) -> BTreeMap<String, (u32, u32, u32)> {
         })
         .collect()
 }
+
 impl Fixture {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
@@ -94,9 +100,11 @@ impl Fixture {
             output,
         }
     }
+
     fn link(&self) -> Output {
         ok(&["-c", p(&self.output), "-d", p(&self.data), "--incremental"])
     }
+
     fn verify(&self) {
         let items = listing(&self.output);
         fn collect(root: &Path, base: &Path, out: &mut BTreeMap<String, Vec<u8>>) {

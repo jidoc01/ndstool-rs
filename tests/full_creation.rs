@@ -27,6 +27,7 @@ impl Fixture {
         }
         Self(path)
     }
+
     fn build(&self, name: &str, extra: &[&str]) -> PathBuf {
         let out = self.0.join(name);
         let result = Command::new(env!("CARGO_BIN_EXE_ndstool-rs"))
@@ -49,6 +50,7 @@ impl Fixture {
         out
     }
 }
+
 impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);

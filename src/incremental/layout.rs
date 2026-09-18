@@ -7,12 +7,15 @@ use std::{
 pub(super) fn read32(b: &[u8], p: usize) -> u32 {
     u32::from_le_bytes(b[p..p + 4].try_into().unwrap())
 }
+
 pub(super) fn put32(b: &mut [u8], p: usize, n: u32) {
     b[p..p + 4].copy_from_slice(&n.to_le_bytes());
 }
+
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
+
 fn parent(path: &str) -> &str {
     let p = path.rfind('/').unwrap();
     if p == 0 {
@@ -21,6 +24,7 @@ fn parent(path: &str) -> &str {
         &path[..p]
     }
 }
+
 fn name(path: &str) -> &str {
     path.rsplit('/').next().unwrap()
 }

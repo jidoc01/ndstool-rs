@@ -9,6 +9,7 @@ use std::{
 fn le32(b: &[u8], p: usize) -> u32 {
     u32::from_le_bytes([b[p], b[p + 1], b[p + 2], b[p + 3]])
 }
+
 fn text(b: &[u8]) -> String {
     b.iter()
         .take_while(|&&x| x != 0)
@@ -57,12 +58,14 @@ pub(crate) fn read(path: &Path) -> io::Result<Header> {
         scfg_ext_mask: le32(&b, 0x1a8),
     })
 }
+
 pub(crate) fn print_info(h: &Header) {
     println!("Title       : {}\nGame code   : {}\nMaker code  : {}\nUnit code   : 0x{:02X}\nDevice cap  : 0x{:02X}\nARM9        : 0x{:08X} ({} bytes, entry 0x{:08X}, RAM 0x{:08X})\nARM7        : 0x{:08X} ({} bytes, entry 0x{:08X}, RAM 0x{:08X})\nFNT         : 0x{:08X} ({} bytes)\nFAT         : 0x{:08X} ({} bytes)\nBanner      : 0x{:08X}", h.title,h.game_code,h.maker_code,h.unit_code,h.device_capacity,h.arm9_offset,h.arm9_size,h.arm9_entry,h.arm9_ram,h.arm7_offset,h.arm7_size,h.arm7_entry,h.arm7_ram,h.fnt_offset,h.fnt_size,h.fat_offset,h.fat_size,h.banner_offset);
     if h.unit_code & 2 != 0 || h.dsi9_offset != 0 || h.dsi7_offset != 0 {
         println!("DSi flags   : 0x{:02X}\nDSi9        : 0x{:08X} ({} bytes, RAM 0x{:08X})\nDSi7        : 0x{:08X} ({} bytes, RAM 0x{:08X})\nBanner size : 0x{:08X}\nTotal ROM   : 0x{:08X}\nRegion flags: 0x{:08X}\nAccess      : 0x{:08X}\nSCFG mask   : 0x{:08X}", h.dsi_flags, h.dsi9_offset, h.dsi9_size, h.dsi9_ram, h.dsi7_offset, h.dsi7_size, h.dsi7_ram, h.banner_size, h.total_rom_size, h.region_flags, h.access_control, h.scfg_ext_mask);
     }
 }
+
 pub(crate) fn crc16(data: &[u8]) -> u16 {
     let mut crc = 0xffffu16;
     for &byte in data {
@@ -82,6 +85,7 @@ fn crc16_byte(index: u8) -> u16 {
     }
     value
 }
+
 pub(crate) fn fix_crc(path: &Path) -> io::Result<()> {
     let mut data = fs::read(path)?;
     if data.len() < 0x160 {

@@ -13,17 +13,22 @@ use std::{
     path::{Component, Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
+
 mod layout;
 mod transaction;
+
 use layout::{put32, read32, tables};
 
 const MAGIC: &[u8; 8] = b"NDSRS003";
+
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
+
 fn dir(root: &Path) -> PathBuf {
     root.join(".ndstool-rs")
 }
+
 fn nonce() -> String {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     format!(
@@ -36,17 +41,21 @@ fn nonce() -> String {
             .as_nanos()
     )
 }
+
 fn aligned(n: u64) -> u64 {
     (n + 511) & !511
 }
+
 fn u32_offset(n: u64) -> io::Result<u32> {
     u32::try_from(n).map_err(|_| invalid("ROM exceeds the 32-bit offset limit"))
 }
+
 #[derive(Clone, PartialEq)]
 struct Stamp {
     size: u64,
     modified: u128,
 }
+
 fn stamp(meta: &fs::Metadata) -> io::Result<Stamp> {
     Ok(Stamp {
         size: meta.len(),
@@ -57,16 +66,19 @@ fn stamp(meta: &fs::Metadata) -> io::Result<Stamp> {
             .as_nanos(),
     })
 }
+
 struct Input {
     path: PathBuf,
     stamp: Stamp,
 }
+
 struct State {
     snapshot: String,
     high_water: u64,
     entries: Vec<Entry>,
     stamps: BTreeMap<String, Stamp>,
 }
+
 struct Lock(PathBuf);
 impl Lock {
     fn acquire(root: &Path) -> io::Result<Self> {
@@ -85,6 +97,7 @@ impl Lock {
         Ok(Self(path))
     }
 }
+
 impl Drop for Lock {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.0);
@@ -128,6 +141,7 @@ fn scan(root: &Path) -> io::Result<BTreeMap<String, Input>> {
     visit(root, "", &mut result)?;
     Ok(result)
 }
+
 fn safe_path(path: &str) -> bool {
     path.starts_with('/')
         && !path.contains('\\')
@@ -136,6 +150,7 @@ fn safe_path(path: &str) -> bool {
             .all(|c| matches!(c, Component::Normal(_)))
         && !path[1..].is_empty()
 }
+
 fn encode(state: &State) -> Vec<u8> {
     let mut b = MAGIC.to_vec();
     b.extend_from_slice(&(state.snapshot.len() as u32).to_le_bytes());
@@ -153,6 +168,7 @@ fn encode(state: &State) -> Vec<u8> {
     }
     b
 }
+
 struct Reader<'a>(&'a [u8]);
 impl<'a> Reader<'a> {
     fn take(&mut self, n: usize) -> io::Result<&'a [u8]> {
@@ -163,14 +179,17 @@ impl<'a> Reader<'a> {
         self.0 = b;
         Ok(a)
     }
+
     fn number(&mut self) -> io::Result<u32> {
         Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
     }
+
     fn text(&mut self) -> io::Result<String> {
         let n = self.number()? as usize;
         String::from_utf8(self.take(n)?.to_vec()).map_err(|_| invalid("invalid state string"))
     }
 }
+
 fn load(root: &Path) -> io::Result<State> {
     let data = fs::read(dir(root).join("layout.bin"))?;
     let mut r = Reader(&data);
@@ -248,6 +267,7 @@ fn publish(temp: &Path, target: &Path) -> io::Result<()> {
     }
     Ok(())
 }
+
 fn save(root: &Path, state: &State) -> io::Result<()> {
     let temporary = dir(root).join(format!("state-{}.tmp", nonce()));
     let mut file = File::create(&temporary)?;
@@ -256,16 +276,19 @@ fn save(root: &Path, state: &State) -> io::Result<()> {
     drop(file);
     publish(&temporary, &dir(root).join("layout.bin"))
 }
+
 fn range(file: &mut File, start: u64, size: usize) -> io::Result<Vec<u8>> {
     let mut b = vec![0; size];
     file.seek(SeekFrom::Start(start))?;
     file.read_exact(&mut b)?;
     Ok(b)
 }
+
 fn write_at(file: &mut File, start: u64, b: &[u8]) -> io::Result<()> {
     file.seek(SeekFrom::Start(start))?;
     file.write_all(b)
 }
+
 fn fill(file: &mut File, start: u64, end: u64) -> io::Result<()> {
     file.seek(SeekFrom::Start(start))?;
     let block = [0xff; 65536];
@@ -312,6 +335,7 @@ fn opaque_gap(
     }
     Ok(false)
 }
+
 fn validate(file: &mut File, h: &Header, entries: &[Entry]) -> io::Result<Vec<u8>> {
     let len = file.metadata()?.len();
     if h.fat_size % 8 != 0 || h.fat_size > 65536 * 8 || h.fnt_size > 16 * 1024 * 1024 {

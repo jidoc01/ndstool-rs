@@ -1,6 +1,6 @@
 use std::io;
 
-pub(crate) const ENCR_DATA: [u8; 0x1048] = [
+const ENCR_DATA: [u8; 0x1048] = [
     0x99, 0xD5, 0x20, 0x5F, 0x57, 0x44, 0xF5, 0xB9, 0x6E, 0x19, 0xA4, 0xD9, 0x9E, 0x6A, 0x5A, 0x94,
     0xD8, 0xAE, 0xF1, 0xEB, 0x41, 0x75, 0xE2, 0x3A, 0x93, 0x82, 0xD0, 0x32, 0x33, 0xEE, 0x31, 0xD5,
     0xCC, 0x57, 0x61, 0x9A, 0x37, 0x06, 0xA2, 0x1B, 0x79, 0x39, 0x72, 0xF5, 0x55, 0xAE, 0xF6, 0xBE,
@@ -264,7 +264,7 @@ pub(crate) const ENCR_DATA: [u8; 0x1048] = [
     0x96, 0xE7, 0xC4, 0x18, 0x5F, 0xAD, 0xF5, 0x19,
 ];
 
-pub(crate) fn lookup(magic: &[u32; 0x412], value: u32) -> u32 {
+fn lookup(magic: &[u32; 0x412], value: u32) -> u32 {
     let a = magic[((value >> 24) & 0xff) as usize + 18];
     let b = magic[((value >> 16) & 0xff) as usize + 18 + 256];
     let c = magic[((value >> 8) & 0xff) as usize + 18 + 512];
@@ -272,7 +272,7 @@ pub(crate) fn lookup(magic: &[u32; 0x412], value: u32) -> u32 {
     d.wrapping_add(c ^ b.wrapping_add(a))
 }
 
-pub(crate) fn encrypt(magic: &[u32; 0x412], left: &mut u32, right: &mut u32) {
+fn encrypt(magic: &[u32; 0x412], left: &mut u32, right: &mut u32) {
     let mut a = *left;
     let mut b = *right;
     for i in 0..16 {
@@ -284,7 +284,7 @@ pub(crate) fn encrypt(magic: &[u32; 0x412], left: &mut u32, right: &mut u32) {
     *left = b ^ magic[17];
 }
 
-pub(crate) fn decrypt(magic: &[u32; 0x412], left: &mut u32, right: &mut u32) {
+fn decrypt(magic: &[u32; 0x412], left: &mut u32, right: &mut u32) {
     let mut a = *left;
     let mut b = *right;
     for i in (2..=17).rev() {
@@ -296,7 +296,7 @@ pub(crate) fn decrypt(magic: &[u32; 0x412], left: &mut u32, right: &mut u32) {
     *right = a ^ magic[1];
 }
 
-pub(crate) fn update_hashtable(magic: &mut [u32; 0x412], key: &[u8; 8]) {
+fn update_hashtable(magic: &mut [u32; 0x412], key: &[u8; 8]) {
     for j in 0..18 {
         let mut value = 0u32;
         for i in 0..4 {
@@ -318,7 +318,7 @@ pub(crate) fn update_hashtable(magic: &mut [u32; 0x412], key: &[u8; 8]) {
     }
 }
 
-pub(crate) fn validate_block(block: &[u8]) -> io::Result<()> {
+fn validate_block(block: &[u8]) -> io::Result<()> {
     if block.len() < 0x800 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -371,6 +371,7 @@ fn init1(gamecode: u32) -> ([u32; 0x412], [u32; 3]) {
 fn word(data: &[u8], p: usize) -> u32 {
     u32::from_le_bytes([data[p], data[p + 1], data[p + 2], data[p + 3]])
 }
+
 fn put_word(data: &mut [u8], p: usize, value: u32) {
     data[p..p + 4].copy_from_slice(&value.to_le_bytes());
 }

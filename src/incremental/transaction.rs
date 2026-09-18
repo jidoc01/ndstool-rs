@@ -128,11 +128,13 @@ mod tests {
         }
     }
 }
+
 fn durable(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut f = File::create(path)?;
     f.write_all(bytes)?;
     f.sync_all()
 }
+
 fn receipt(out: &Path, state: &[u8]) -> io::Result<Vec<u8>> {
     let path = absolute_output(out)?;
     let name = path
@@ -146,6 +148,7 @@ fn receipt(out: &Path, state: &[u8]) -> io::Result<Vec<u8>> {
     b.extend_from_slice(state);
     Ok(b)
 }
+
 fn restore(undo: &Path, target: &Path) -> io::Result<()> {
     let mut source = File::open(undo)?;
     let mut word = [0; 8];

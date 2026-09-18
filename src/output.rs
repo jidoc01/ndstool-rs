@@ -9,6 +9,7 @@ use std::{
 pub(crate) struct Output {
     pub(crate) path: PathBuf,
 }
+
 impl Output {
     pub(crate) fn new(destination: &Path) -> io::Result<(Self, File)> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -34,12 +35,14 @@ impl Output {
         }
         Err(io::Error::other("cannot reserve temporary output"))
     }
+
     pub(crate) fn publish(self, destination: &Path) -> io::Result<()> {
         // All writers must be closed first, especially on Windows. This is
         // failure-safe publication, not a power-loss durability guarantee.
         fs::rename(&self.path, destination)
     }
 }
+
 impl Drop for Output {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
