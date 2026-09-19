@@ -1,10 +1,10 @@
 use crate::{banner, crypto, elf, filesystem, header, logo};
+use rayon::prelude::*;
 use std::{
     fs,
     fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
     path::Path,
-    thread,
 };
 
 struct CopyTask {
@@ -20,25 +20,18 @@ fn write_tasks(bytes: &[u8], tasks: Vec<CopyTask>, jobs: usize) -> io::Result<()
         }
         return Ok(());
     }
-    let worker_count = jobs.min(tasks.len());
-    let chunk_size = tasks.len().div_ceil(worker_count);
-    thread::scope(|scope| {
-        let mut handles = Vec::new();
-        for chunk in tasks.chunks(chunk_size) {
-            handles.push(scope.spawn(move || -> io::Result<()> {
-                for task in chunk {
-                    fs::write(&task.path, &bytes[task.start..task.end])?;
-                }
-                Ok(())
-            }));
-        }
-        for handle in handles {
-            handle
-                .join()
-                .map_err(|_| io::Error::other("parallel extraction worker panicked"))??;
-        }
-        Ok(())
-    })
+    // A fresh, bounded pool honors --jobs without changing any other Rayon
+    // user in the process. par_iter schedules individual files with work
+    // stealing, so a worker that finishes small files can take more work.
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(jobs.min(tasks.len()))
+        .build()
+        .map_err(|error| io::Error::other(format!("cannot start extraction pool: {error}")))?
+        .install(|| {
+            tasks
+                .par_iter()
+                .try_for_each(|task| fs::write(&task.path, &bytes[task.start..task.end]))
+        })
 }
 
 pub(crate) fn extract_entries(

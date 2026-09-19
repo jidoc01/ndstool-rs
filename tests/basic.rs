@@ -248,6 +248,8 @@ fn create_and_extract_root_data_file() {
     let extracted = dir.join("extracted");
     fs::create_dir_all(&data).unwrap();
     fs::write(data.join("hello.txt"), b"hello nds").unwrap();
+    fs::write(data.join("empty.bin"), []).unwrap();
+    fs::write(data.join("larger.bin"), vec![0x5a; 4097]).unwrap();
     let arm9 = dir.join("arm9.bin");
     let arm7 = dir.join("arm7.bin");
     let rom = dir.join("test.nds");
@@ -273,12 +275,19 @@ fn create_and_extract_root_data_file() {
             "-x",
             rom.to_str().unwrap(),
             "-d",
-            extracted.to_str().unwrap()
+            extracted.to_str().unwrap(),
+            "--jobs",
+            "3"
         ])
         .status()
         .unwrap()
         .success());
     assert_eq!(fs::read(extracted.join("hello.txt")).unwrap(), b"hello nds");
+    assert_eq!(fs::read(extracted.join("empty.bin")).unwrap(), b"");
+    assert_eq!(
+        fs::read(extracted.join("larger.bin")).unwrap(),
+        vec![0x5a; 4097]
+    );
     let _ = fs::remove_dir_all(dir);
 }
 
